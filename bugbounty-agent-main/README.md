@@ -117,205 +117,43 @@ That's it. HawkEye handles the rest.
 
 ---
 
-## Quick Start
+## Kali Linux Setup
+
+Use Go 1.24 or later and Git. The installer does not install Go. The CLI also requires `subfinder`, `httpx`, and `nuclei` on `PATH`, even if Nuclei is disabled in `config.yaml`.
 
 ```bash
-# 1. Clone
 git clone https://github.com/Btr4k/bugbounty-agent.git
 cd bugbounty-agent
+go version
 
-# 2. Install all dependencies
-chmod +x install.sh && ./install.sh
-
-# 3. Set your AI key
-cp .env.example .env
-echo "DEEPSEEK_API_KEY=your-key-here" >> .env
-
-# 4. Build
-go build -o hawkeye ./cmd/main.go
-
-# 5. Scan
-./hawkeye -d target.com
-```
-
----
-
-## Usage
-
-```
-./hawkeye [flags]
-
-Required (either flag works):
-  -d, --domain      string   Target domain (e.g. example.com)
-  -t, --target      string   Target domain (alias for -d/--domain)
-
-Options:
-  -v, --verbose              Show detailed scan progress
-  -c, --config     string    Config file path (default: config.yaml)
-  -o, --output     string    Report output directory (default: ./reports)
-      --skip-recon           Skip recon phase (subdomains already known)
-      --skip-scan            Skip vulnerability scanning phase
-      --js-only              Run JS analysis only (skips vulnerability scanning)
-      --ai-provider string   Override AI provider: claude | deepseek | openai | openrouter
-      --ai-model    string   Override AI model name
-  -h, --help                 Show help
-```
-
-### Examples
-
-```bash
-# Standard full scan
-./hawkeye -d target.com
-
-# Full scan with live progress output
-./hawkeye -d target.com --verbose
-
-# JS secrets and endpoints only (fast, no scanning)
-./hawkeye -d target.com --js-only
-
-# Skip subdomain enumeration
-./hawkeye -d target.com --skip-recon
-
-# Skip scanning, run AI analysis on recon output only
-./hawkeye -d target.com --skip-scan
-
-# Use a specific AI provider for this run
-./hawkeye -d target.com --ai-provider claude --ai-model claude-sonnet-4-20250514
-
-# Use short flags
-./hawkeye -t target.com -v
-```
-
----
-
-## Installation
-
-### System Requirements
-
-- **OS**: Linux (Ubuntu 20.04+, Debian 11+, Kali, Parrot)
-- **Go**: 1.24 or later
-- **RAM**: 512MB minimum, 2GB recommended for large targets
-
-### Automatic (recommended)
-
-```bash
-chmod +x install.sh && ./install.sh
-```
-
-The installer handles Go tools, system packages, and nuclei templates.
-
-### Manual
-
-```bash
-# Core Go tools
 go install github.com/projectdiscovery/subfinder/v2/cmd/subfinder@latest
 go install github.com/projectdiscovery/httpx/cmd/httpx@latest
 go install github.com/projectdiscovery/nuclei/v3/cmd/nuclei@latest
-go install github.com/projectdiscovery/katana/cmd/katana@latest
-go install github.com/tomnomnom/assetfinder@latest
-go install github.com/tomnomnom/waybackurls@latest
-go install github.com/ffuf/ffuf/v2@latest
-go install github.com/hahwul/dalfox/v2@latest
+export PATH="$(go env GOPATH)/bin:$PATH"
 
-# System tools
-sudo apt install -y nmap
-
-# Optional — hidden parameter discovery
-pip3 install arjun
-
-# Wordlist for ffuf (strongly recommended)
-sudo apt install seclists
-
-# Nuclei templates
-nuclei -update-templates
-
-# Build HawkEye
 go build -o hawkeye ./cmd/main.go
+cp .env.example .env
+nano .env
 ```
 
----
+In `.env`, set a valid key for exactly one supported provider: `ANTHROPIC_API_KEY`, `DEEPSEEK_API_KEY`, `OPENAI_API_KEY`, or `OPENROUTER_API_KEY`. The provider is auto-detected. Keep the key private; do not commit `.env`.
 
-## Configuration
-
-### AI Provider
-
-Edit `config.yaml` or set env vars in `.env`:
-
-```yaml
-ai:
-  provider: "deepseek"            # deepseek | claude | openai | openrouter
-  api_key: "${DEEPSEEK_API_KEY}"  # loaded from .env automatically
-  model: "deepseek-chat"
-  max_tokens: 2000
-```
-
-### Supported AI Providers
-
-| Provider | Model | Recommended For |
-|---|---|---|
-| **DeepSeek** | deepseek-chat | Default — best cost/quality ratio |
-| **Claude** | claude-sonnet-4-20250514 | Highest accuracy |
-| **OpenAI** | gpt-4o-mini | Fast and cheap |
-| **OpenRouter** | any model | Multi-model access |
-
-### C99.nl API (Subdomain Intelligence)
-
-C99.nl significantly improves subdomain discovery. Without it, HawkEye still works but misses subdomains that only C99's database covers.
-
-**Get a key:** Register at [c99.nl](https://c99.nl) → Dashboard → API Key
-
-Add it to `.env`:
-
-```env
-C99_API_KEY=your-api-key-here
-```
-
-It is automatically picked up via `config.yaml`:
-
-```yaml
-c99:
-  api_key: "${C99_API_KEY}"
-  enabled: true
-```
-
-To disable C99 without removing the key:
-
-```yaml
-c99:
-  enabled: false
-```
-
----
-
-### Wordlist (ffuf)
-
-For maximum path discovery coverage, install SecLists:
+Run from the project directory, replacing `example.com` with a domain you are authorized to test:
 
 ```bash
-sudo apt install seclists
-# Auto-detected at: /usr/share/seclists/Discovery/Web-Content/common.txt
+./hawkeye -d example.com --verbose
 ```
 
-Or specify a custom path in `config.yaml`:
+The current `config.yaml` enables recon and HTTP probing; other vulnerability scanners are disabled by default. Reports are written to `./reports`.
 
-```yaml
-scanning:
-  tools:
-    ffuf:
-      wordlist_path: "/path/to/your/wordlist.txt"
-```
+### CLI Options
 
-Without SecLists, HawkEye falls back to a built-in list of ~130 high-value paths  
-(.env, .git, admin panels, Spring actuators, swagger, etc.) — functional but limited coverage.
-
-### Blind XSS
-
-```yaml
-scanning:
-  tools:
-    dalfox:
-      blind_url: "https://your-burp-collaborator.com"
-```
+- `-d`, `--domain` or `-t`, `--target`: target domain (required)
+- `-c`, `--config`: config path (default `config.yaml`)
+- `-o`, `--output`: report directory (default `./reports`)
+- `-v`, `--verbose`: detailed progress
+- `--skip-recon`, `--skip-scan`, `--js-only`: skip or limit phases
+- `--ai-provider`, `--ai-model`: override the configured provider or model
 
 ---
 

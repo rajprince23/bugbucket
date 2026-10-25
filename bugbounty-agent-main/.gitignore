@@ -7,10 +7,18 @@
 .env.local
 .env.production
 .env.staging
+.env.*
+*.env
+*.env.*
+!.env.example
 *.key
 *.pem
-secrets.yaml
-secrets.yml
+*.p12
+*.pfx
+*.secret
+*.credentials
+*.token
+secrets.*
 
 # ─── Reports (may contain sensitive vulnerability data) ──────
 reports/*
@@ -25,6 +33,14 @@ hawkeye
 hawkeye-*
 bugbounty-agent
 bugbounty-agent.exe
+*.exe
+*.dll
+*.so
+*.dylib
+*.o
+*.a
+*.test
+*.out
 dist/
 bin/
 main
