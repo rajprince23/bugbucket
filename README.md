@@ -24,6 +24,8 @@ It chains recon tools and vulnerability scanners into a single workflow, then ap
 
 That's it. BugBasket handles the rest.
 
+**Author:** [Raj Prince Kumar](https://www.linkedin.com/in/raj-prince-kumar-6478b2246/)
+
 ---
 
 ## Modules

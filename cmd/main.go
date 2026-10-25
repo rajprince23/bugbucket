@@ -590,6 +590,7 @@ func printPhaseHeader(num, title, icon string) {
 
 func printBanner() {
 	fmt.Println(color.CyanString(banner()))
+	fmt.Printf("  LinkedIn: %s\n", "https://www.linkedin.com/in/raj-prince-kumar-6478b2246/")
 }
 
 func banner() string {
