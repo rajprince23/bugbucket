@@ -9,8 +9,7 @@ import (
 )
 
 // ═══════════════════════════════════════════════════════════
-// JS Regex Pre-Scanner — Fast pattern matching before AI
-// Catches sensitive data the AI might miss in truncated files
+// JavaScript regex rules detect hardcoded secrets and suspicious patterns.
 // ═══════════════════════════════════════════════════════════
 
 type regexPattern struct {
@@ -271,7 +270,7 @@ func ExtractCoreSecret(value string) string {
 }
 
 // ScanJSWithRegex performs fast regex-based scanning on JS file contents.
-// Returns findings that complement the AI analysis.
+// Returns findings from the configured local patterns.
 func ScanJSWithRegex(jsFiles []struct {
 	URL     string
 	Content string

@@ -10,11 +10,11 @@ import (
 type PreValidOutcome int
 
 const (
-	// PreValidKeep: finding is ambiguous — pass to AI for deeper analysis.
+	// PreValidKeep: no specific adjustment rule applies.
 	PreValidKeep PreValidOutcome = iota
-	// PreValidReject: definite false positive — skip AI entirely.
+	// PreValidReject: deterministic rules indicate a likely false positive.
 	PreValidReject
-	// PreValidDowngrade: reduce severity before passing to AI.
+	// PreValidDowngrade: reduce severity based on a deterministic rule.
 	PreValidDowngrade
 )
 
@@ -22,14 +22,13 @@ const (
 type PreValidResult struct {
 	Outcome     PreValidOutcome
 	NewSeverity string // only meaningful when Outcome == PreValidDowngrade
-	Reason      string // human-readable explanation stored in AIAnalysis
+	Reason      string // human-readable explanation stored with the rule assessment
 }
 
-// PreValidateFinding applies deterministic security rules to catch obvious false
-// positives before spending AI tokens on them. Rules are based on security
-// fundamentals — no guessing, no probability, only hard facts.
+// PreValidateFinding applies deterministic security rules to identify likely
+// false positives and severity adjustments based on security fundamentals.
 //
-// Call this for every non-JS finding before sending to the AI batch.
+// Call this for every scanner finding before reporting.
 func PreValidateFinding(f scanner.Finding) PreValidResult {
 	switch f.Type {
 	case "cors-misconfiguration":
@@ -112,7 +111,7 @@ func preValidDirectory(f scanner.Finding) PreValidResult {
 
 	// Rule D-2: Generic 403/401 on non-critical paths.
 	// A 403 confirms the path exists but proves nothing exploitable.
-	// Exception: admin/API paths are borderline — pass to AI at lower severity.
+	// Exception: admin/API paths are borderline — keep them at lower severity.
 	accessControlKeywords := []string{"admin", "administrator", "graphql", "swagger", "api-docs", "actuator"}
 	for _, kw := range accessControlKeywords {
 		if strings.Contains(url, kw) || strings.Contains(evidence, kw) {
@@ -120,7 +119,7 @@ func preValidDirectory(f scanner.Finding) PreValidResult {
 				Outcome:     PreValidDowngrade,
 				NewSeverity: "low",
 				Reason: "Admin/API path returning 403/401 indicates server-side access control is in place. " +
-					"Downgraded to Low — the AI will verify whether authentication bypass is feasible.",
+					"Downgraded to Low; manually verify whether authentication bypass is feasible.",
 			}
 		}
 	}

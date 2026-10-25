@@ -18,6 +18,7 @@ import (
 	"github.com/Btr4k/bugbounty-agent/internal/config"
 	"github.com/Btr4k/bugbounty-agent/internal/logger"
 	"github.com/Btr4k/bugbounty-agent/internal/recon"
+	"github.com/Btr4k/bugbounty-agent/internal/scope"
 )
 
 type Engine struct {
@@ -26,8 +27,10 @@ type Engine struct {
 }
 
 type Results struct {
-	Findings []Finding
-	Stats    ScanStats
+	Findings        []Finding
+	Stats           ScanStats
+	ScanExecuted    bool            `json:"-"`
+	CompletedChecks map[string]bool `json:"-"`
 }
 
 type Finding struct {
@@ -68,11 +71,34 @@ func NewEngine(cfg *config.Config, log *logger.Logger) *Engine {
 }
 
 func (e *Engine) Run(ctx context.Context, reconResults *recon.Results) (*Results, error) {
+	if len(e.cfg.Target.Domains) == 0 {
+		return nil, fmt.Errorf("active scanning requires an explicitly authorized target domain")
+	}
+
+	scopedRecon := *reconResults
+	var rejectedHosts, rejectedURLs int
+	scopedRecon.Subdomains, rejectedHosts = e.filterScopedHosts(reconResults.Subdomains)
+	scopedRecon.URLs, rejectedURLs = e.filterScopedURLs(reconResults.URLs)
+	if rejectedHosts > 0 {
+		e.log.Warnf("Rejected %d out-of-scope recon hosts before active scanning", rejectedHosts)
+	}
+	if rejectedURLs > 0 {
+		e.log.Warnf("Rejected %d out-of-scope or invalid discovered URLs before active scanning", rejectedURLs)
+	}
+	reconResults = &scopedRecon
+
 	results := &Results{
-		Findings: make([]Finding, 0),
+		Findings:        make([]Finding, 0),
+		ScanExecuted:    true,
+		CompletedChecks: make(map[string]bool),
 	}
 
 	mu := &sync.Mutex{}
+	markCheckCompleted := func(check string) {
+		mu.Lock()
+		results.CompletedChecks[check] = true
+		mu.Unlock()
+	}
 
 	// Show what tools will run
 	totalTargets := len(reconResults.Subdomains)
@@ -134,6 +160,12 @@ func (e *Engine) Run(ctx context.Context, reconResults *recon.Results) (*Results
 			}
 		}
 		e.log.PhaseNote("No live hosts from httpx, falling back to raw subdomains")
+	}
+
+	var rejectedLiveHosts int
+	liveHosts, rejectedLiveHosts = e.filterScopedURLs(liveHosts)
+	if rejectedLiveHosts > 0 {
+		e.log.Warnf("Rejected %d out-of-scope live-host results before vulnerability scans", rejectedLiveHosts)
 	}
 
 	// ════════════════════════════════════════════════
@@ -205,6 +237,13 @@ func (e *Engine) Run(ctx context.Context, reconResults *recon.Results) (*Results
 				return
 			}
 
+			if len(nucleiTargets) > 0 {
+				markCheckCompleted("nuclei")
+				if e.cfg.Scanning.Tools.Nuclei.TemplatesPath != "" && len(nucleiTargets) <= 50 {
+					markCheckCompleted("nuclei-ssl")
+					markCheckCompleted("nuclei-misconfiguration")
+				}
+			}
 			e.log.ToolDone("Nuclei", len(findings), time.Since(start))
 			if len(findings) > 0 {
 				e.log.Debugf("Nuclei: found %d total findings (all severities included)", len(findings))
@@ -267,6 +306,9 @@ func (e *Engine) Run(ctx context.Context, reconResults *recon.Results) (*Results
 				return
 			}
 
+			if len(liveHosts) > 0 || len(filterSQLiProneURLs(reconResults.URLs)) > 0 {
+				markCheckCompleted("sqli")
+			}
 			e.log.ToolDone("SQLi-Scan", len(findings), time.Since(start))
 			mu.Lock()
 			results.Findings = append(results.Findings, findings...)
@@ -319,6 +361,9 @@ func (e *Engine) Run(ctx context.Context, reconResults *recon.Results) (*Results
 				return
 			}
 
+			if len(liveHosts) > 0 {
+				markCheckCompleted("cors")
+			}
 			e.log.ToolDone("CORS Check", len(findings), time.Since(start))
 			mu.Lock()
 			results.Findings = append(results.Findings, findings...)
@@ -387,6 +432,7 @@ func (e *Engine) Run(ctx context.Context, reconResults *recon.Results) (*Results
 				return
 			}
 
+			markCheckCompleted("xss")
 			e.log.ToolDone("Dalfox", len(findings), time.Since(start))
 			mu.Lock()
 			results.Findings = append(results.Findings, findings...)
@@ -464,6 +510,7 @@ func (e *Engine) Run(ctx context.Context, reconResults *recon.Results) (*Results
 
 // runNucleiDirect runs Nuclei with full URLs directly (preserves ports from httpx)
 func (e *Engine) runNucleiDirect(ctx context.Context, targets []string) ([]Finding, error) {
+	targets, _ = e.filterScopedURLs(targets)
 	if len(targets) == 0 {
 		e.log.Debug("Nuclei: no targets")
 		return nil, nil
@@ -490,6 +537,7 @@ func (e *Engine) runNucleiDirect(ctx context.Context, targets []string) ([]Findi
 		"-l", tmpFile.Name(),
 		"-jsonl",
 		"-silent",
+		"-disable-redirects",
 		"-stats",
 		"-si", "30",
 	}
@@ -773,6 +821,7 @@ func (e *Engine) runHttpx(ctx context.Context, targets []string) ([]Finding, []s
 	var liveHosts []string
 
 	// Validate and filter targets
+	targets, _ = e.filterScopedHosts(targets)
 	targets = validateSubdomains(targets)
 	if len(targets) == 0 {
 		e.log.Debug("Httpx: no valid targets after filtering")
@@ -802,7 +851,6 @@ func (e *Engine) runHttpx(ctx context.Context, targets []string) ([]Finding, []s
 		"-silent",
 		"-td",
 		"-sc",
-		"-fr",
 		"-t", fmt.Sprintf("%d", e.cfg.Scanning.Threads),
 		"-rl", fmt.Sprintf("%d", e.cfg.Scanning.RateLimit),
 	}
@@ -843,13 +891,13 @@ func (e *Engine) runHttpx(ctx context.Context, targets []string) ([]Finding, []s
 		}
 
 		// Collect live host URL (any HTTP response = live)
-		if httpxResult.URL != "" && !seen[httpxResult.URL] {
+		if httpxResult.URL != "" && scope.URLInScope(httpxResult.URL, e.cfg.Target.Domains) && !seen[httpxResult.URL] {
 			seen[httpxResult.URL] = true
 			liveHosts = append(liveHosts, httpxResult.URL)
 		}
 
 		// Create findings for interesting status codes or technologies
-		if httpxResult.StatusCode >= 500 {
+		if httpxResult.StatusCode >= 500 && scope.URLInScope(httpxResult.URL, e.cfg.Target.Domains) {
 			findings = append(findings, Finding{
 				ID:          "httpx-server-error",
 				Title:       "Server Error Detected",
@@ -861,7 +909,7 @@ func (e *Engine) runHttpx(ctx context.Context, targets []string) ([]Finding, []s
 			})
 		}
 
-		if len(httpxResult.Technologies) > 0 {
+		if len(httpxResult.Technologies) > 0 && scope.URLInScope(httpxResult.URL, e.cfg.Target.Domains) {
 			findings = append(findings, Finding{
 				ID:          "httpx-tech-detection",
 				Title:       "Web Technologies Detected",
@@ -883,6 +931,7 @@ func (e *Engine) runNmap(ctx context.Context, targets []string) ([]Finding, erro
 	var findings []Finding
 
 	// Validate and filter targets
+	targets, _ = e.filterScopedHosts(targets)
 	targets = validateSubdomains(targets)
 
 	// Prioritize meaningful subdomains for Nmap (it's resource-intensive)
@@ -965,6 +1014,32 @@ func (e *Engine) calculateStats(results *Results) {
 			results.Stats.Info++
 		}
 	}
+}
+
+func (e *Engine) filterScopedHosts(targets []string) ([]string, int) {
+	filtered := make([]string, 0, len(targets))
+	rejected := 0
+	for _, target := range targets {
+		if scope.HostInScope(scope.HostFromTarget(target), e.cfg.Target.Domains) {
+			filtered = append(filtered, target)
+		} else {
+			rejected++
+		}
+	}
+	return filtered, rejected
+}
+
+func (e *Engine) filterScopedURLs(urls []string) ([]string, int) {
+	filtered := make([]string, 0, len(urls))
+	rejected := 0
+	for _, target := range urls {
+		if scope.URLInScope(target, e.cfg.Target.Domains) {
+			filtered = append(filtered, target)
+		} else {
+			rejected++
+		}
+	}
+	return filtered, rejected
 }
 
 // validDomainRegex matches valid domain name characters
@@ -1195,6 +1270,7 @@ func extractParameterizedURLs(urls []string) []string {
 
 // runDalfox runs dalfox XSS scanner on parameterized URLs
 func (e *Engine) runDalfox(ctx context.Context, urls []string) ([]Finding, error) {
+	urls, _ = e.filterScopedURLs(urls)
 	var findings []Finding
 
 	if len(urls) == 0 {

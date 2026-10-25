@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ============================================================
-# HawkEye v2.1 — Dependency Installer
+# BugBasket v2.1 — Dependency Installer
 # Tested on: Ubuntu 20.04+, Debian 11+, Kali Linux
 # Usage: chmod +x install.sh && ./install.sh
 # ============================================================
@@ -15,14 +15,7 @@ success() { echo -e "${GREEN}[✓]${RESET} $1"; }
 warn()    { echo -e "${YELLOW}[!]${RESET} $1"; }
 error()   { echo -e "${RED}[✗]${RESET} $1"; exit 1; }
 
-echo -e "${BOLD}${CYAN}"
-echo "  ██╗  ██╗ █████╗ ██╗    ██╗██╗  ██╗███████╗██╗   ██╗███████╗"
-echo "  ██║  ██║██╔══██╗██║    ██║██║ ██╔╝██╔════╝╚██╗ ██╔╝██╔════╝"
-echo "  ███████║███████║██║ █╗ ██║█████╔╝ █████╗   ╚████╔╝ █████╗  "
-echo "  ██╔══██║██╔══██║██║███╗██║██╔═██╗ ██╔══╝    ╚██╔╝  ██╔══╝  "
-echo "  ██║  ██║██║  ██║╚███╔███╔╝██║  ██╗███████╗   ██║   ███████╗"
-echo "  ╚═╝  ╚═╝╚═╝  ╚═╝ ╚══╝╚══╝ ╚═╝  ╚═╝╚══════╝   ╚═╝   ╚══════╝"
-echo -e "                  Dependency Installer v2.1${RESET}"
+echo -e "${BOLD}${CYAN}  BugBasket — Dependency Installer v2.1${RESET}"
 echo ""
 
 # ─── Check OS ────────────────────────────────────────────────
@@ -102,17 +95,17 @@ setup_nuclei() {
     fi
 }
 
-# ─── Build HawkEye ───────────────────────────────────────────
-build_hawkeye() {
-    info "Building HawkEye..."
-    go build -o hawkeye ./cmd/main.go && success "HawkEye built successfully: ./hawkeye" || error "Build failed"
+# ─── Build BugBasket ─────────────────────────────────────────
+build_bugbasket() {
+    info "Building BugBasket..."
+    go build -o bugbasket ./cmd/main.go && success "BugBasket built successfully: ./bugbasket" || error "Build failed"
 }
 
 # ─── Setup .env ──────────────────────────────────────────────
 setup_env() {
     if [[ ! -f ".env" ]]; then
         cp .env.example .env
-        warn "Created .env from template — edit it and add your API keys:"
+        warn "Created optional .env from template — set C99_API_KEY only if using C99 recon:"
         warn "  nano .env"
     else
         success ".env already exists"
@@ -125,7 +118,7 @@ install_system_tools
 install_go_tools
 install_python_tools
 setup_nuclei
-build_hawkeye
+build_bugbasket
 setup_env
 
 echo ""
@@ -134,8 +127,8 @@ echo -e "${GREEN}${BOLD}  ✅ Installation complete!${RESET}"
 echo -e "${GREEN}${BOLD}══════════════════════════════════════════${RESET}"
 echo ""
 echo -e "  Next steps:"
-echo -e "  1. Edit ${CYAN}.env${RESET} and add your AI API key"
-echo -e "  2. Run: ${CYAN}./hawkeye --target example.com --verbose${RESET}"
+echo -e "  1. Optionally set ${CYAN}C99_API_KEY${RESET} in .env for C99 passive reconnaissance"
+echo -e "  2. Run: ${CYAN}./bugbasket --target example.com --verbose${RESET}"
 echo ""
-echo -e "  Docs: ${CYAN}https://github.com/Btr4k/bugbounty-agent${RESET}"
+echo -e "  Docs: ${CYAN}https://github.com/rajprince23/bugbucket${RESET}"
 echo ""

@@ -19,6 +19,7 @@ import (
 //  2. Virtual-host (vhost) fuzzing to discover hidden internal apps
 func (e *Engine) runFfuf(ctx context.Context, liveHosts []string) ([]Finding, error) {
 	var findings []Finding
+	liveHosts, _ = e.filterScopedURLs(liveHosts)
 
 	if len(liveHosts) == 0 {
 		return findings, nil

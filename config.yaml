@@ -1,18 +1,5 @@
-# Bug Bounty AI Agent Configuration
+# BugBasket configuration
 # Supply the target with -d/--domain or -t/--target.
-
-ai:
-  provider: "auto"
-  api_key: ""
-  model: ""
-  max_tokens: 2000
-  base_url: ""
-
-# Legacy Claude settings used by the config loader for backward compatibility.
-claude:
-  api_key: ""
-  model: "claude-sonnet-4-20250514"
-  max_tokens: 2000
 
 c99:
   api_key: ""
@@ -70,9 +57,6 @@ scanning:
 
 analysis:
   enabled: true
-  min_confidence: 0.7
-  auto_validate: true
-  false_positive_filter: true
   js_analysis: true
 
 reporting:

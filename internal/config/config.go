@@ -11,8 +11,6 @@ import (
 )
 
 type Config struct {
-	AI            AIConfig            `yaml:"ai" mapstructure:"ai"`
-	Claude        ClaudeConfig        `yaml:"claude" mapstructure:"claude"`
 	C99           C99Config           `yaml:"c99" mapstructure:"c99"`
 	Target        TargetConfig        `yaml:"target" mapstructure:"target"`
 	Recon         ReconConfig         `yaml:"recon" mapstructure:"recon"`
@@ -23,24 +21,9 @@ type Config struct {
 	Logging       LoggingConfig       `yaml:"logging" mapstructure:"logging"`
 }
 
-// AIConfig unified AI provider configuration
-type AIConfig struct {
-	Provider  string `yaml:"provider" mapstructure:"provider"`   // claude, deepseek, openai, openrouter, custom
-	APIKey    string `yaml:"api_key" mapstructure:"api_key"`
-	Model     string `yaml:"model" mapstructure:"model"`
-	MaxTokens int    `yaml:"max_tokens" mapstructure:"max_tokens"`
-	BaseURL   string `yaml:"base_url" mapstructure:"base_url"`   // for openrouter/custom
-}
-
 type C99Config struct {
 	APIKey  string `yaml:"api_key" mapstructure:"api_key"`
 	Enabled bool   `yaml:"enabled" mapstructure:"enabled"`
-}
-
-type ClaudeConfig struct {
-	APIKey    string `yaml:"api_key" mapstructure:"api_key"`
-	Model     string `yaml:"model" mapstructure:"model"`
-	MaxTokens int    `yaml:"max_tokens" mapstructure:"max_tokens"`
 }
 
 type TargetConfig struct {
@@ -124,11 +107,8 @@ type DalfoxConfig struct {
 }
 
 type AnalysisConfig struct {
-	Enabled             bool    `yaml:"enabled" mapstructure:"enabled"`
-	MinConfidence       float64 `yaml:"min_confidence" mapstructure:"min_confidence"`
-	AutoValidate        bool    `yaml:"auto_validate" mapstructure:"auto_validate"`
-	FalsePositiveFilter bool    `yaml:"false_positive_filter" mapstructure:"false_positive_filter"`
-	JSAnalysis          bool    `yaml:"js_analysis" mapstructure:"js_analysis"`
+	Enabled    bool `yaml:"enabled" mapstructure:"enabled"`
+	JSAnalysis bool `yaml:"js_analysis" mapstructure:"js_analysis"`
 }
 
 type ReportingConfig struct {
@@ -197,16 +177,11 @@ func Load(filename string) (*Config, error) {
 	loadEnvFile()
 
 	// Set defaults
-	viper.SetDefault("ai.provider", "deepseek")
-	viper.SetDefault("ai.max_tokens", 2000)
-	viper.SetDefault("claude.model", "claude-sonnet-4-20250514")
-	viper.SetDefault("claude.max_tokens", 4000)
 	viper.SetDefault("recon.timeout", 300)
 	viper.SetDefault("recon.max_subdomains", 1000)
 	viper.SetDefault("recon.max_wayback_urls", 10000)
 	viper.SetDefault("scanning.threads", 50)
 	viper.SetDefault("scanning.rate_limit", 100)
-	viper.SetDefault("analysis.min_confidence", 0.7)
 	viper.SetDefault("reporting.format", "markdown")
 	viper.SetDefault("reporting.language", "ar")
 	viper.SetDefault("c99.enabled", false)
@@ -227,27 +202,15 @@ func Load(filename string) (*Config, error) {
 		return nil, fmt.Errorf("failed to unmarshal config: %w", err)
 	}
 
-	// Expand environment variables FIRST (before validation)
-	cfg.AI.APIKey = os.ExpandEnv(cfg.AI.APIKey)
-	cfg.Claude.APIKey = os.ExpandEnv(cfg.Claude.APIKey)
 	cfg.C99.APIKey = os.ExpandEnv(cfg.C99.APIKey)
 
-	// Also check direct env vars as fallback
-	if cfg.Claude.APIKey == "" || cfg.Claude.APIKey == "${ANTHROPIC_API_KEY}" {
-		if envKey := os.Getenv("ANTHROPIC_API_KEY"); envKey != "" {
-			cfg.Claude.APIKey = envKey
-		}
-	}
 	if cfg.C99.APIKey == "" || cfg.C99.APIKey == "${C99_API_KEY}" {
 		if envKey := os.Getenv("C99_API_KEY"); envKey != "" {
 			cfg.C99.APIKey = envKey
 		}
 	}
 
-	// Resolve AI provider config with backward compatibility
-	cfg.ResolveAIConfig()
-
-	// Validate AFTER expanding env vars
+	// Validate after expanding optional environment variables.
 	if err := cfg.Validate(); err != nil {
 		return nil, err
 	}
@@ -255,121 +218,8 @@ func Load(filename string) (*Config, error) {
 	return &cfg, nil
 }
 
-// autoDetectProvider scans environment variables and returns the first provider
-// whose API key is set. Priority: claude → deepseek → openai → openrouter.
-// Returns ("", "") if no key is found.
-func autoDetectProvider() (provider, apiKey string) {
-	candidates := []struct {
-		provider string
-		envVar   string
-	}{
-		{"claude", "ANTHROPIC_API_KEY"},
-		{"deepseek", "DEEPSEEK_API_KEY"},
-		{"openai", "OPENAI_API_KEY"},
-		{"openrouter", "OPENROUTER_API_KEY"},
-	}
-	for _, c := range candidates {
-		if key := os.Getenv(c.envVar); key != "" && !strings.HasPrefix(key, "your-") {
-			return c.provider, key
-		}
-	}
-	return "", ""
-}
-
-// ResolveAIConfig fills in AI config defaults based on provider, with backward compat.
-// If provider is "auto" (or empty), it detects the provider from whichever env var is set.
-func (c *Config) ResolveAIConfig() {
-	// Resolve api_key env var expansion first
-	if c.AI.APIKey == "${AI_API_KEY}" {
-		c.AI.APIKey = ""
-	}
-
-	// Auto-detect provider from env vars when:
-	//   - provider is "auto" or empty
-	//   - OR the configured provider's key is missing
-	needsAutoDetect := c.AI.Provider == "auto" || c.AI.Provider == ""
-	if !needsAutoDetect && c.AI.APIKey == "" {
-		// Provider is set but key is missing — try auto-detect as fallback
-		needsAutoDetect = true
-	}
-
-	if needsAutoDetect {
-		if p, k := autoDetectProvider(); p != "" {
-			c.AI.Provider = p
-			if c.AI.APIKey == "" {
-				c.AI.APIKey = k
-			}
-		}
-	}
-
-	// Final fallback provider (must be before key fallback so switch works)
-	if c.AI.Provider == "" || c.AI.Provider == "auto" {
-		c.AI.Provider = "deepseek"
-	}
-
-	// Backward compatibility: if api_key still empty, try provider-specific fallbacks
-	if c.AI.APIKey == "" {
-		switch c.AI.Provider {
-		case "claude":
-			c.AI.APIKey = c.Claude.APIKey
-		case "deepseek":
-			c.AI.APIKey = os.Getenv("DEEPSEEK_API_KEY")
-		case "openai":
-			c.AI.APIKey = os.Getenv("OPENAI_API_KEY")
-		case "openrouter":
-			c.AI.APIKey = os.Getenv("OPENROUTER_API_KEY")
-		}
-	}
-
-	// Backward compat: if model is empty, use provider default
-	if c.AI.Model == "" {
-		switch c.AI.Provider {
-		case "claude":
-			if c.Claude.Model != "" {
-				c.AI.Model = c.Claude.Model
-			} else {
-				c.AI.Model = "claude-sonnet-4-20250514"
-			}
-		case "deepseek":
-			c.AI.Model = "deepseek-chat"
-		case "openai":
-			c.AI.Model = "gpt-4o-mini"
-		case "openrouter":
-			c.AI.Model = "deepseek/deepseek-chat"
-		}
-	}
-
-	if c.AI.MaxTokens == 0 {
-		if c.Claude.MaxTokens > 0 {
-			c.AI.MaxTokens = c.Claude.MaxTokens
-		} else {
-			c.AI.MaxTokens = 2000
-		}
-	}
-
-	// Auto-set base URL for known providers
-	if c.AI.BaseURL == "" {
-		switch c.AI.Provider {
-		case "deepseek":
-			c.AI.BaseURL = "https://api.deepseek.com/v1"
-		case "openai":
-			c.AI.BaseURL = "https://api.openai.com/v1"
-		case "openrouter":
-			c.AI.BaseURL = "https://openrouter.ai/api/v1"
-		}
-	}
-}
-
 // Validate validates the configuration
 func (c *Config) Validate() error {
-	if c.AI.APIKey == "" {
-		return fmt.Errorf("AI API key is required (set api_key in ai: section, or ANTHROPIC_API_KEY / DEEPSEEK_API_KEY / OPENAI_API_KEY env var)")
-	}
-
-	if c.AI.Provider == "custom" && c.AI.BaseURL == "" {
-		return fmt.Errorf("base_url is required when using custom AI provider")
-	}
-
 	// Note: Target.Domains is NOT validated here because it is set from the CLI
 	// flag (--target) in main.go AFTER config.Load() returns.
 

@@ -26,17 +26,16 @@ var (
 	targetDomain string
 	outputDir    string
 	verbose      bool
-	aiProvider   string
-	aiModel      string
 	skipRecon    bool
 	skipScan     bool
 	jsOnly       bool
+	nmapXMLFile  string
 )
 
 func main() {
 	rootCmd := &cobra.Command{
-		Use:   "hawkeye",
-		Short: "HawkEye - AI-Powered Bug Bounty Hunting Tool",
+		Use:   "bugbasket",
+		Short: "BugBasket - Rule-Based Bug Bounty Hunting Tool",
 		Long:  banner(),
 		RunE:  runAgent,
 	}
@@ -46,11 +45,10 @@ func main() {
 	rootCmd.Flags().StringVarP(&targetDomain, "domain", "d", "", "Target domain (alias for -t/--target)")
 	rootCmd.Flags().StringVarP(&outputDir, "output", "o", "./reports", "Output directory")
 	rootCmd.Flags().BoolVarP(&verbose, "verbose", "v", false, "Verbose output")
-	rootCmd.Flags().StringVar(&aiProvider, "ai-provider", "", "AI provider: claude, deepseek, openai, openrouter, custom")
-	rootCmd.Flags().StringVar(&aiModel, "ai-model", "", "AI model name (e.g. deepseek-chat, gpt-4o-mini, claude-sonnet-4-20250514)")
 	rootCmd.Flags().BoolVar(&skipRecon, "skip-recon", false, "Skip the reconnaissance phase")
 	rootCmd.Flags().BoolVar(&skipScan, "skip-scan", false, "Skip the vulnerability scanning phase")
 	rootCmd.Flags().BoolVar(&jsOnly, "js-only", false, "Run JS file analysis only (skips vulnerability scanning)")
+	rootCmd.Flags().StringVar(&nmapXMLFile, "nmap-xml", "", "Import an Nmap XML file offline (skips recon and all active scans)")
 
 	if err := rootCmd.Execute(); err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
@@ -76,28 +74,16 @@ func runAgent(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to load config: %w", err)
 	}
 
-	// Override AI provider/model from CLI flags
-	if aiProvider != "" {
-		cfg.AI.Provider = aiProvider
-		// Re-resolve config for the new provider (API key, base URL, default model)
-		cfg.AI.APIKey = "" // Reset to trigger re-resolution
-		cfg.AI.BaseURL = "" // Reset to trigger auto-detection
-		if aiModel == "" {
-			cfg.AI.Model = "" // Reset to trigger default model for new provider
-		}
-		cfg.ResolveAIConfig()
-	}
-	if aiModel != "" {
-		cfg.AI.Model = aiModel
-	}
-
 	// Validate target domain (prevent command injection)
 	if err := validateDomain(targetDomain); err != nil {
 		return fmt.Errorf("invalid target domain: %w", err)
 	}
 
-	// Validate required tools are installed before wasting time
-	checkTools(log)
+	offlineImport := nmapXMLFile != ""
+	if !offlineImport {
+		// Validate required tools are installed before wasting time
+		checkTools(log)
+	}
 
 	// Add target domain to config
 	cfg.Target.Domains = []string{targetDomain}
@@ -132,17 +118,8 @@ func runAgent(cmd *cobra.Command, args []string) error {
 	dim.Printf("  ⏰ Started: %s\n", startTime.Format("2006-01-02 15:04:05"))
 	fmt.Println()
 
-	// AI Provider info
-	white.Printf("  🤖 AI Provider: ")
-	cyan.Printf("%s\n", strings.ToUpper(cfg.AI.Provider))
-	white.Printf("  📦 AI Model:    ")
-	cyan.Printf("%s\n", cfg.AI.Model)
-	apiKeyMasked := cfg.AI.APIKey
-	if len(apiKeyMasked) > 12 {
-		apiKeyMasked = apiKeyMasked[:8] + "..." + apiKeyMasked[len(apiKeyMasked)-4:]
-	}
-	white.Printf("  🔑 API Key:     ")
-	dim.Printf("%s\n", apiKeyMasked)
+	white.Printf("  🧭 Analysis:    ")
+	cyan.Println("Deterministic local rules")
 	fmt.Println()
 
 	// ═══════════════════════════════════════
@@ -151,10 +128,14 @@ func runAgent(cmd *cobra.Command, args []string) error {
 	var reconResults *recon.Results
 	phaseStart := time.Now()
 
-	if skipRecon {
-		dim.Println("  ⏭️  Skipping reconnaissance phase (--skip-recon)")
+	if skipRecon || offlineImport {
+		if offlineImport {
+			dim.Println("  ⏭️  Skipping reconnaissance phase (--nmap-xml: offline import mode)")
+		} else {
+			dim.Println("  ⏭️  Skipping reconnaissance phase (--skip-recon)")
+		}
 		reconResults = &recon.Results{
-			Subdomains: cfg.Target.Domains,
+			Subdomains: make([]string, 0),
 			URLs:       make([]string, 0),
 			Endpoints:  make([]string, 0),
 			IPs:        make([]string, 0),
@@ -205,8 +186,10 @@ func runAgent(cmd *cobra.Command, args []string) error {
 	var critical, high, medium, low, info int
 	var displayFindings []scanner.Finding
 
-	if skipScan || jsOnly {
-		if jsOnly {
+	if skipScan || jsOnly || offlineImport {
+		if offlineImport {
+			dim.Println("  ⏭️  Skipping active scans (--nmap-xml: offline import mode)")
+		} else if jsOnly {
 			dim.Println("  ⏭️  Skipping vulnerability scanning (--js-only: recon done, JS analysis next)")
 		} else {
 			dim.Println("  ⏭️  Skipping vulnerability scanning (--skip-scan)")
@@ -246,6 +229,19 @@ func runAgent(cmd *cobra.Command, args []string) error {
 		}
 	}
 	fmt.Println()
+
+	if offlineImport {
+		importedFindings, err := scanner.ImportNmapXML(nmapXMLFile, cfg.Target.Domains)
+		if err != nil {
+			return fmt.Errorf("failed to import Nmap XML: %w", err)
+		}
+		scanResults.Findings = append(scanResults.Findings, importedFindings...)
+		critical, high, medium, low, info = countBySeverity(scanResults.Findings)
+		if len(cfg.Reporting.SeverityFilter) == 0 {
+			cfg.Reporting.SeverityFilter = []string{"critical", "high", "medium", "low", "info"}
+		}
+		log.Infof("Imported %d in-scope open-port findings from Nmap XML", len(importedFindings))
+	}
 
 	// Show findings details (only actionable ones)
 	if len(displayFindings) > 0 {
@@ -359,7 +355,7 @@ func runAgent(cmd *cobra.Command, args []string) error {
 		// Note about filtered info findings
 		if info > 0 {
 			dim.Printf("  💡 Note: %d informational findings were hidden from display\n", info)
-			dim.Println("     (They're still analyzed by AI and included in the report)")
+			dim.Println("     (They're retained in the report)")
 			fmt.Println()
 		}
 		white.Printf("  ")
@@ -368,10 +364,10 @@ func runAgent(cmd *cobra.Command, args []string) error {
 	fmt.Println()
 
 	// ═══════════════════════════════════════
-	// Phase 2.5: JS File Analysis (Regex + AI)
+	// Phase 2.5: JavaScript file analysis with local regex rules
 	// ═══════════════════════════════════════
 	if cfg.Analysis.JSAnalysis && len(reconResults.JSFiles) > 0 {
-		printPhaseHeader("2.5", "JS FILE ANALYSIS (REGEX + AI)", "📜")
+		printPhaseHeader("2.5", "JS FILE ANALYSIS (LOCAL RULES)", "📜")
 		phaseStart = time.Now()
 
 		// Convert recon.JSFile to analyzer-compatible struct
@@ -431,89 +427,22 @@ func runAgent(cmd *cobra.Command, args []string) error {
 			dim.Println("  ├── 🔎 Regex: no patterns detected")
 		}
 
-		// ── Step 2: AI-powered deep analysis ──
-		cyan.Printf("  📁 AI analyzing %d JS files with %s...\n", len(reconResults.JSFiles), strings.ToUpper(cfg.AI.Provider))
-
-		jsAnalyzer := analyzer.NewEngine(cfg, log)
-		aiFindings, err := jsAnalyzer.AnalyzeJSFiles(ctx, jsInput)
-		if err != nil {
-			log.Warnf("JS AI analysis failed: %v", err)
-		}
-
-		// Merge regex + AI findings (dedup by core secret value, not raw evidence string)
-		allJSFindings := regexFindings
-		seenEvidence := make(map[string]bool)
-		for _, rf := range regexFindings {
-			seenEvidence[rf.Evidence] = true
-			// Also register the core secret (e.g. the API key itself, stripped of context)
-			seenEvidence[analyzer.ExtractCoreSecret(rf.Evidence)] = true
-		}
-		for _, af := range aiFindings {
-			core := analyzer.ExtractCoreSecret(af.Evidence)
-			if seenEvidence[af.Evidence] || seenEvidence[core] {
-				continue
-			}
-			// Substring check: skip if the AI evidence is contained in any regex evidence or vice versa
-			isDuplicate := false
-			for _, rf := range regexFindings {
-				if strings.Contains(rf.Evidence, af.Evidence) || strings.Contains(af.Evidence, rf.Evidence) {
-					isDuplicate = true
-					break
-				}
-			}
-			if isDuplicate {
-				continue
-			}
-			allJSFindings = append(allJSFindings, af)
-			seenEvidence[af.Evidence] = true
-			seenEvidence[core] = true
-		}
+		cyan.Printf("  📁 Applying deterministic rules to %d JS files...\n", len(reconResults.JSFiles))
 
 		jsDuration := time.Since(phaseStart)
 		green.Printf("  ✅ Completed in %s\n", jsDuration.Round(time.Second))
 
-		if len(allJSFindings) > 0 {
-			fmt.Printf("  └── 🔍 JS Findings: %s (Regex: %d, AI: %d)\n",
-				white.Sprintf("%d", len(allJSFindings)),
-				len(regexFindings), len(aiFindings))
+		if len(regexFindings) > 0 {
+			fmt.Printf("  └── 🔍 Rule-based JS findings: %s\n", white.Sprintf("%d", len(regexFindings)))
 			fmt.Println()
-			yellow.Println("  📋 JS Analysis Results:")
-			for _, jf := range allJSFindings {
-				sevColor := dim
-				sevIcon := "ℹ️ "
-				switch jf.Severity {
-				case "critical":
-					sevColor = red
-					sevIcon = "🔴"
-				case "high":
-					sevColor = color.New(color.FgHiRed)
-					sevIcon = "🟠"
-				case "medium":
-					sevColor = yellow
-					sevIcon = "🟡"
-				case "low":
-					sevColor = green
-					sevIcon = "🟢"
-				}
-				sevColor.Printf("     %s [%s] ", sevIcon, strings.ToUpper(jf.Severity))
-				white.Printf("%s\n", jf.Title)
-				if jf.Evidence != "" {
-					evidenceTrunc := jf.Evidence
-					if len(evidenceTrunc) > 80 {
-						evidenceTrunc = evidenceTrunc[:80] + "..."
-					}
-					dim.Printf("        Value: %s\n", evidenceTrunc)
-				}
-				if jf.Description != "" {
-					dim.Printf("        Info:  %s\n", jf.Description)
-				}
+			yellow.Println("  📋 Rule-based JS Analysis Results:")
+			for _, finding := range regexFindings {
+				dim.Printf("     [%s] %s\n", strings.ToUpper(finding.Severity), finding.Title)
 			}
-
-			// Merge JS findings into scan results
-			scanResults.Findings = append(scanResults.Findings, allJSFindings...)
+			scanResults.Findings = append(scanResults.Findings, regexFindings...)
 			critical, high, medium, low, info = countBySeverity(scanResults.Findings)
 		} else {
-			dim.Println("  └── No sensitive data found in JS files")
+			dim.Println("  └── No matching JS patterns found")
 		}
 	} else if len(reconResults.JSFiles) == 0 {
 		dim.Println("  ⏭️  JS Analysis: no JS files found during recon")
@@ -521,9 +450,9 @@ func runAgent(cmd *cobra.Command, args []string) error {
 	fmt.Println()
 
 	// ═══════════════════════════════════════
-	// Phase 3: AI Analysis
+	// Phase 3: Deterministic local analysis
 	// ═══════════════════════════════════════
-	printPhaseHeader("3", "AI-POWERED ANALYSIS", "🤖")
+	printPhaseHeader("3", "RULE-BASED ANALYSIS", "🧭")
 	phaseStart = time.Now()
 
 	analyzerEngine := analyzer.NewEngine(cfg, log)
@@ -534,8 +463,8 @@ func runAgent(cmd *cobra.Command, args []string) error {
 
 	analysisDuration := time.Since(phaseStart)
 	green.Printf("  ✅ Completed in %s\n", analysisDuration.Round(time.Second))
-	fmt.Printf("  ├── ✓ Validated:       %s\n", white.Sprintf("%d", len(analysisResults.ValidatedFindings)))
-	fmt.Printf("  └── ✗ False Positives: %s\n", white.Sprintf("%d", len(analysisResults.FalsePositives)))
+	fmt.Printf("  ├── ✓ Rule-assessed:   %s\n", white.Sprintf("%d", len(analysisResults.ValidatedFindings)))
+	fmt.Printf("  └── ✗ Discarded:       %s\n", white.Sprintf("%d", len(analysisResults.FalsePositives)))
 	fmt.Println()
 
 	// ═══════════════════════════════════════
@@ -660,32 +589,14 @@ func printPhaseHeader(num, title, icon string) {
 }
 
 func printBanner() {
-	banner := `
-┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
-┃                                                              ┃
-┃   ██╗  ██╗ █████╗ ██╗    ██╗██╗  ██╗███████╗██╗   ██╗███████╗
-┃   ██║  ██║██╔══██╗██║    ██║██║ ██╔╝██╔════╝╚██╗ ██╔╝██╔════╝
-┃   ███████║███████║██║ █╗ ██║█████╔╝ █████╗   ╚████╔╝ █████╗
-┃   ██╔══██║██╔══██║██║███╗██║██╔═██╗ ██╔══╝    ╚██╔╝  ██╔══╝
-┃   ██║  ██║██║  ██║╚███╔███╔╝██║  ██╗███████╗   ██║   ███████╗
-┃   ╚═╝  ╚═╝╚═╝  ╚═╝ ╚══╝╚══╝ ╚═╝  ╚═╝╚══════╝   ╚═╝   ╚══════╝
-┃                                                              ┃
-┃            AI-Powered Bug Bounty Hunting Tool v2.1           ┃
-┃            Multi-AI Engine | Nuclei | Deep Scan              ┃
-┃                                                              ┃
-┃                    Developed by @A_cyb3r                     ┃
-┃                https://twitter.com/A_cyb3r                   ┃
-┃                                                              ┃
-┗━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┛
-`
-	fmt.Println(color.CyanString(banner))
+	fmt.Println(color.CyanString(banner()))
 }
 
 func banner() string {
 	return `
 ╔══════════════════════════════════════════════════════════╗
-║     HawkEye - AI Bug Bounty Hunter by @A_cyb3r          ║
-║     Automated Security Testing & Vulnerability Analysis  ║
+║     BugBasket - Rule-Based Bug Bounty CLI                ║
+║     Authorized Security Testing & Analysis               ║
 ╚══════════════════════════════════════════════════════════╝
 `
 }
@@ -703,7 +614,7 @@ func printSummary(duration time.Duration, critical, high, medium, low, info int,
 	dim := color.New(color.FgHiBlack)
 
 	cyan.Println("  ╔════════════════════════════════════════════════════╗")
-	cyan.Println("  ║         🎯 HAWKEYE SCAN COMPLETED                 ║")
+	cyan.Println("  ║         🎯 BUGBASKET SCAN COMPLETED               ║")
 	cyan.Println("  ╠════════════════════════════════════════════════════╣")
 	cyan.Print("  ║")
 	fmt.Printf("  ⏱️  Scan Duration:     %-26s", duration.Round(time.Second))
@@ -715,7 +626,7 @@ func printSummary(duration time.Duration, critical, high, medium, low, info int,
 	fmt.Printf("  🔎 Vulnerabilities:   %-26d", totalFindings)
 	cyan.Println("║")
 	cyan.Print("  ║")
-	fmt.Printf("  ✓  AI Validated:      %-26d", validated)
+	fmt.Printf("  ✓  Rule-Assessed:     %-26d", validated)
 	cyan.Println("║")
 	cyan.Println("  ╠════════════════════════════════════════════════════╣")
 	cyan.Print("  ║")
@@ -768,7 +679,7 @@ func printSummary(duration time.Duration, critical, high, medium, low, info int,
 	cyan.Println("║")
 	cyan.Println("  ╠════════════════════════════════════════════════════╣")
 	cyan.Print("  ║")
-	dim.Print("  Developed by @A_cyb3r | HawkEye v2.1")
+	dim.Print("  BugBasket | v2.1")
 	cyan.Println("║")
 	cyan.Println("  ╚════════════════════════════════════════════════════╝")
 
@@ -785,7 +696,7 @@ func printSummary(duration time.Duration, critical, high, medium, low, info int,
 		green.Printf("  ℹ️  INFO: Found %d low-severity findings - Review when convenient\n", total)
 	}
 	fmt.Println()
-	cyan.Println("  📌 Thank you for using HawkEye - Happy Hunting!")
+	cyan.Println("  📌 Thank you for using BugBasket!")
 	dim.Println("  🐦 Follow @A_cyb3r on Twitter for updates")
 	fmt.Println()
 }

@@ -1,33 +1,28 @@
 <p align="center">
-  <img src="logo.png" alt="HawkEye" width="720" />
-</p>
-
-<p align="center">
   <img src="https://img.shields.io/badge/version-2.1-0d1117?style=for-the-badge&labelColor=0d1117&color=58a6ff" />
   <img src="https://img.shields.io/badge/Go-1.24+-00ADD8?style=for-the-badge&logo=go&logoColor=white" />
-  <img src="https://img.shields.io/badge/AI-DeepSeek%20%7C%20Claude%20%7C%20GPT--4-a855f7?style=for-the-badge" />
+  <img src="https://img.shields.io/badge/Analysis-Local%20Rules-22c55e?style=for-the-badge" />
   <img src="https://img.shields.io/badge/license-MIT-22c55e?style=for-the-badge" />
   <img src="https://img.shields.io/badge/platform-Linux-f97316?style=for-the-badge&logo=linux&logoColor=white" />
 </p>
 
 <p align="center">
-  <b>Recon → Scan → AI Validation → Report</b><br/>
+  <b>Recon → Scan → Deterministic Rule Assessment → Report</b><br/>
   One command. Full attack surface. Zero noise.
 </p>
 
 ---
 
-## What is HawkEye?
+## What is BugBasket?
 
-HawkEye is a full-pipeline bug bounty automation agent written in Go.  
-It chains recon tools, vulnerability scanners, and an AI validator into a single workflow —  
-producing a clean, analyst-grade report with confirmed findings only.
+BugBasket is a full-pipeline bug bounty automation CLI written in Go.  
+It chains recon tools and vulnerability scanners into a single workflow, then applies deterministic local rules to findings. Reports retain scanner findings and clearly identify them as rule-assessed, not independently confirmed.
 
 ```
-./hawkeye -d hackerone-target.com
+./bugbasket -d hackerone-target.com
 ```
 
-That's it. HawkEye handles the rest.
+That's it. BugBasket handles the rest.
 
 ---
 
@@ -66,8 +61,7 @@ That's it. HawkEye handles the rest.
   ┌─────────────────────────────────────────────────────────────────┐
   │  PHASE 2.5 — JS ANALYSIS                                        │
   │                                                                 │
-  │  Regex engine  → API keys · secrets · endpoints · S3 buckets   │
-  │  AI (LLM)      → deep analysis of app bundles (12KB/file)      │
+  │  Local regex rules → API keys · secrets · endpoints · buckets │
   │                                                                 │
   │  Detects: AWS/GitHub/Stripe/Firebase keys · JWT tokens         │
   │           hardcoded passwords · internal API routes            │
@@ -76,13 +70,13 @@ That's it. HawkEye handles the rest.
                                 │
                                 ▼
   ┌─────────────────────────────────────────────────────────────────┐
-  │  PHASE 3 — AI VALIDATION                                        │
+  │  PHASE 3 — RULE-BASED ANALYSIS                                  │
   │                                                                 │
-  │  Every finding is reviewed by the AI:                          │
-  │  · Confirms real vs false positive                             │
-  │  · Assigns CVSS-informed severity                              │
-  │  · Generates PoC for each confirmed finding                    │
-  │  · Writes impact assessment + remediation                      │
+  │  Deterministic local rules assess every scanner finding:       │
+  │  · Preserve findings and flag likely false positives           │
+  │  · Apply defined severity adjustments where applicable         │
+  │  · Provide rule-based impact and remediation guidance          │
+  │  · Require manual verification of exploitability               │
   └─────────────────────────────┬───────────────────────────────────┘
                                 │
                                 ▼
@@ -91,7 +85,7 @@ That's it. HawkEye handles the rest.
   │                                                                 │
   │  Markdown report with:                                         │
   │  · Executive summary · Risk score · Severity breakdown         │
-  │  · Confirmed findings only · Evidence + PoC per finding        │
+  │  · Rule-assessed findings · Evidence + optional PoC             │
   └─────────────────────────────────────────────────────────────────┘
 ```
 
@@ -112,8 +106,8 @@ That's it. HawkEye handles the rest.
 | SQLi | nuclei + param filter | SQL injection vectors |
 | Hidden Params | arjun | Undocumented GET/POST parameters |
 | Port Scan | nmap | Open ports |
-| JS Analysis | Regex + LLM | API keys, secrets, endpoints, S3 buckets, tokens |
-| AI Validation | DeepSeek / Claude / GPT-4 | False positive filtering + PoC generation |
+| JS Analysis | Local regex rules | API keys, secrets, endpoints, buckets, tokens |
+| Finding Analysis | Deterministic local rules | Severity adjustments, rule notes, remediation guidance |
 
 ---
 
@@ -122,8 +116,8 @@ That's it. HawkEye handles the rest.
 Use Go 1.24 or later and Git. The installer does not install Go. The CLI also requires `subfinder`, `httpx`, and `nuclei` on `PATH`, even if Nuclei is disabled in `config.yaml`.
 
 ```bash
-git clone https://github.com/Btr4k/bugbounty-agent.git
-cd bugbounty-agent
+git clone https://github.com/rajprince23/bugbucket.git
+cd bugbucket
 go version
 
 go install github.com/projectdiscovery/subfinder/v2/cmd/subfinder@latest
@@ -131,20 +125,22 @@ go install github.com/projectdiscovery/httpx/cmd/httpx@latest
 go install github.com/projectdiscovery/nuclei/v3/cmd/nuclei@latest
 export PATH="$(go env GOPATH)/bin:$PATH"
 
-go build -o hawkeye ./cmd/main.go
-cp .env.example .env
-nano .env
+go build -o bugbasket ./cmd/main.go
 ```
 
-In `.env`, set a valid key for exactly one supported provider: `ANTHROPIC_API_KEY`, `DEEPSEEK_API_KEY`, `OPENAI_API_KEY`, or `OPENROUTER_API_KEY`. The provider is auto-detected. Keep the key private; do not commit `.env`.
+Analysis runs locally and requires no provider credentials. `C99_API_KEY` is optional and only needed if you enable C99 passive reconnaissance.
 
 Run from the project directory, replacing `example.com` with a domain you are authorized to test:
 
 ```bash
-./hawkeye -d example.com --verbose
+./bugbasket -d example.com --verbose
 ```
 
 The current `config.yaml` enables recon and HTTP probing; other vulnerability scanners are disabled by default. Reports are written to `./reports`.
+
+### Authorization and Target Scope
+
+The domain supplied with `-d` or `-t` is the authorized scope. Active checks are limited to that exact domain and its subdomains; similarly named domains (for example, `example.com.attacker.test`) and unrelated hosts are rejected. Passive recon results may still include external URLs, but those URLs are not actively scanned. Active checks do not follow redirects to out-of-scope hosts. The `scanning.tools.httpx.follow_redirects` option cannot override this scope protection.
 
 ### CLI Options
 
@@ -153,7 +149,7 @@ The current `config.yaml` enables recon and HTTP probing; other vulnerability sc
 - `-o`, `--output`: report directory (default `./reports`)
 - `-v`, `--verbose`: detailed progress
 - `--skip-recon`, `--skip-scan`, `--js-only`: skip or limit phases
-- `--ai-provider`, `--ai-model`: override the configured provider or model
+- `--nmap-xml <file>`: import open ports and service/version details from a local Nmap XML file; skips reconnaissance and all active scans. Supply `-d` with the authorized domain as usual. Only hosts whose XML hostname (or explicitly authorized IP address) is in scope are included.
 
 ---
 
@@ -173,7 +169,7 @@ Executive Summary
   └── Risk score · Finding counts · Subdomains discovered
 
 Critical Findings
-  └── Title · URL · Evidence · AI Analysis · PoC
+  └── Title · URL · Evidence · Impact · Remediation · PoC (when enabled)
 
 High / Medium / Low Findings
   └── Same structure
@@ -182,11 +178,19 @@ Subdomain List
   └── All discovered subdomains
 ```
 
+Set `reporting.include_poc` in `config.yaml` to control whether proof-of-concept details appear in the report. Impact and remediation text is generated from deterministic local rules; it is guidance and does not establish exploitability.
+
+Reports support `reporting.format: "markdown"` or `"json"` and `reporting.language: "en"` or `"ar"`. `reporting.severity_filter` accepts `critical`, `high`, `medium`, `low`, and `info`; when empty, reports include critical through low severity findings, matching the default report behavior.
+
+Reports also include an OWASP Top 10:2021 coverage table based only on existing checks. Categories are marked `covered` when a mapped check completed, `not run` when mapped checks exist but none completed, or `not covered` when this project has no mapped check. This is an indicative mapping, not comprehensive OWASP coverage or a guarantee that a category is secure.
+
+Offline Nmap XML imports produce informational open-port findings with any detected service, product, and version details. When `reporting.severity_filter` is empty, offline import mode includes informational findings in the generated report.
+
 ---
 
 ## CORS Severity Reference
 
-HawkEye's built-in CORS engine tests multiple attack vectors and assigns severity  
+BugBasket's built-in CORS engine tests multiple attack vectors and assigns severity  
 based on actual exploitability — not just header presence:
 
 | Pattern | Severity | Exploitable? |
@@ -203,7 +207,7 @@ based on actual exploitability — not just header presence:
 
 ## Legal
 
-> **HawkEye is for authorized security testing only.**  
+> **BugBasket is for authorized security testing only.**  
 > Only use this tool against systems you own or have **explicit written permission** to test.  
 > Unauthorized scanning is illegal in most jurisdictions.  
 > See [SECURITY.md](SECURITY.md) for the full responsible disclosure policy.
@@ -211,5 +215,5 @@ based on actual exploitability — not just header presence:
 ---
 
 <p align="center">
-  Built by <a href="https://x.com/A_cyb3r">@A_cyb3r</a> &nbsp;·&nbsp; MIT License &nbsp;·&nbsp; v2.1
+  BugBasket &nbsp;·&nbsp; MIT License &nbsp;·&nbsp; v2.1
 </p>

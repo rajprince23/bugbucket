@@ -1,5 +1,5 @@
 # ============================================================
-# HawkEye .gitignore
+# BugBasket .gitignore
 # ============================================================
 
 # ─── SECRETS — NEVER commit these ───────────────────────────
@@ -29,10 +29,9 @@ logs/
 *.log
 
 # ─── Build artifacts ─────────────────────────────────────────
-hawkeye
-hawkeye-*
-bugbounty-agent
-bugbounty-agent.exe
+bugbasket
+bugbasket-*
+bugbasket.exe
 *.exe
 *.dll
 *.so
@@ -52,7 +51,7 @@ main
 # ─── Temp files ──────────────────────────────────────────────
 *.tmp
 *.temp
-/tmp/sqlmap-hawkeye/
+/tmp/sqlmap-bugbasket/
 
 # ─── Go ──────────────────────────────────────────────────────
 vendor/

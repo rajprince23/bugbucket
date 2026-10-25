@@ -2,7 +2,7 @@
 
 ## Legal Disclaimer
 
-HawkEye is designed for **authorized security testing only**.
+BugBasket is designed for **authorized security testing only**.
 
 - Only use this tool on systems you own or have **explicit written permission** to test
 - Unauthorized scanning is illegal and may violate computer fraud laws
@@ -17,9 +17,9 @@ HawkEye is designed for **authorized security testing only**.
 
 ## Reporting a Vulnerability
 
-If you discover a security vulnerability in HawkEye itself, please report it via:
+If you discover a security vulnerability in BugBasket itself, please report it via:
 
-- GitHub Issues: https://github.com/Btr4k/bugbounty-agent/issues
+- GitHub Issues: https://github.com/rajprince23/bugbucket/issues
 - Twitter: [@A_cyb3r](https://twitter.com/A_cyb3r)
 
 Please do not publicly disclose vulnerabilities until they have been addressed.

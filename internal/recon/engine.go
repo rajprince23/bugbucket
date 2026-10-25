@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"regexp"
 	"sort"
 	"strings"
 	"sync"
@@ -17,6 +18,7 @@ import (
 
 	"github.com/Btr4k/bugbounty-agent/internal/config"
 	"github.com/Btr4k/bugbounty-agent/internal/logger"
+	"github.com/Btr4k/bugbounty-agent/internal/scope"
 )
 
 type Engine struct {
@@ -614,6 +616,14 @@ func (e *Engine) runKatana(ctx context.Context, subdomains []string) ([]string, 
 	}
 
 	var jsURLs []string
+	var rejected int
+	subdomains, rejected = filterScopedReconHosts(subdomains, e.cfg.Target.Domains)
+	if rejected > 0 {
+		e.log.Warnf("Rejected %d out-of-scope Katana seed hosts", rejected)
+	}
+	if len(subdomains) == 0 {
+		return jsURLs, nil
+	}
 
 	// Limit subdomains for katana (it crawls each one)
 	targets := subdomains
@@ -648,6 +658,7 @@ func (e *Engine) runKatana(ctx context.Context, subdomains []string) ([]string, 
 
 	args := []string{
 		"-list", tmpFile.Name(),
+		"-dr",
 		"-jsluice",          // extract JS file URLs and inline JS endpoints (v1.1+)
 		"-silent",
 		"-d", "2",           // crawl depth
@@ -655,6 +666,12 @@ func (e *Engine) runKatana(ctx context.Context, subdomains []string) ([]string, 
 		"-timeout", "10",
 		// No -em filter: Go-side filter handles .js suffix check,
 		// preserving URLs with query strings like app.js?v=123
+	}
+	for _, domain := range e.cfg.Target.Domains {
+		domain = strings.TrimSuffix(strings.ToLower(strings.TrimSpace(domain)), ".")
+		if domain != "" {
+			args = append(args, "-cs", `(?i)^https?://([a-z0-9-]+\.)*`+regexp.QuoteMeta(domain)+`(:[0-9]+)?(/|$)`)
+		}
 	}
 
 	cmd := exec.CommandContext(katanaCtx, "katana", args...)
@@ -669,12 +686,26 @@ func (e *Engine) runKatana(ctx context.Context, subdomains []string) ([]string, 
 	scanner := bufio.NewScanner(strings.NewReader(string(output)))
 	for scanner.Scan() {
 		url := strings.TrimSpace(scanner.Text())
-		if url != "" && strings.HasSuffix(strings.ToLower(strings.Split(url, "?")[0]), ".js") && !isNoiseJS(url) {
+		if url != "" && scope.URLInScope(url, e.cfg.Target.Domains) &&
+			strings.HasSuffix(strings.ToLower(strings.Split(url, "?")[0]), ".js") && !isNoiseJS(url) {
 			jsURLs = append(jsURLs, url)
 		}
 	}
 
 	return jsURLs, nil
+}
+
+func filterScopedReconHosts(hosts, authorizedDomains []string) ([]string, int) {
+	scoped := make([]string, 0, len(hosts))
+	rejected := 0
+	for _, host := range hosts {
+		if scope.HostInScope(scope.HostFromTarget(host), authorizedDomains) {
+			scoped = append(scoped, host)
+		} else {
+			rejected++
+		}
+	}
+	return scoped, rejected
 }
 
 // extractJSFromURLs filters JavaScript URLs from a list of discovered URLs
@@ -718,10 +749,19 @@ func isNoiseJS(u string) bool {
 	return false
 }
 
-// downloadJSFiles downloads JS file content for AI analysis
+// downloadJSFiles downloads JavaScript file content for local analysis.
 func (e *Engine) downloadJSFiles(ctx context.Context, jsURLs []string) []JSFile {
 	var jsFiles []JSFile
 	mu := &sync.Mutex{}
+	scopedURLs := make([]string, 0, len(jsURLs))
+	for _, jsURL := range jsURLs {
+		if scope.URLInScope(jsURL, e.cfg.Target.Domains) {
+			scopedURLs = append(scopedURLs, jsURL)
+		} else {
+			e.log.Warnf("Rejected out-of-scope JavaScript URL before download")
+		}
+	}
+	jsURLs = scopedURLs
 
 	// Prioritize JS files: prefer app bundles over vendor/polyfill files,
 	// and larger files (more code = more secrets/endpoints).
@@ -756,6 +796,12 @@ func (e *Engine) downloadJSFiles(ctx context.Context, jsURLs []string) []JSFile 
 		Timeout: 15 * time.Second,
 		Transport: &http.Transport{
 			TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
+		},
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			if !scope.HostInScope(req.URL.Hostname(), e.cfg.Target.Domains) {
+				return http.ErrUseLastResponse
+			}
+			return nil
 		},
 	}
 
@@ -836,5 +882,3 @@ func isToolInstalled(name string) bool {
 	_, err := exec.LookPath(name)
 	return err == nil
 }
-
-

@@ -11,6 +11,7 @@ import (
 // runSQLMap performs SQL injection testing on parameterized URLs
 func (e *Engine) runSQLMap(ctx context.Context, urls []string) ([]Finding, error) {
 	var findings []Finding
+	urls, _ = e.filterScopedURLs(urls)
 
 	if len(urls) == 0 {
 		return findings, nil
@@ -45,6 +46,7 @@ func (e *Engine) runSQLMap(ctx context.Context, urls []string) ([]Finding, error
 			"--random-agent",       // Random user agent
 			"--level=1",            // Quick scan
 			"--risk=1",             // Safe (low risk)
+			"--ignore-redirects",   // Do not follow to an out-of-scope host
 			"--technique=BEUST",    // All techniques
 			"--threads=3",          // Parallel threads
 			"--timeout=10",         // Per-request timeout
@@ -52,7 +54,7 @@ func (e *Engine) runSQLMap(ctx context.Context, urls []string) ([]Finding, error
 			"--skip-waf",           // Skip WAF detection (faster)
 			"--parse-errors",       // Parse error messages
 			"--flush-session",      // Fresh session
-			"--output-dir=/tmp/sqlmap-hawkeye",
+			"--output-dir=/tmp/sqlmap-bugbasket",
 		}
 
 		cmd := exec.CommandContext(ctx, "sqlmap", args...)

@@ -8,12 +8,22 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/Btr4k/bugbounty-agent/internal/scope"
 )
 
 // runCORSCheck tests live hosts for CORS misconfigurations
 func (e *Engine) runCORSCheck(ctx context.Context, liveHosts []string) ([]Finding, error) {
 	var findings []Finding
 
+	if len(liveHosts) == 0 {
+		return findings, nil
+	}
+	var rejected int
+	liveHosts, rejected = e.filterScopedURLs(liveHosts)
+	if rejected > 0 {
+		e.log.Warnf("Rejected %d out-of-scope hosts before CORS checks", rejected)
+	}
 	if len(liveHosts) == 0 {
 		return findings, nil
 	}
@@ -30,6 +40,9 @@ func (e *Engine) runCORSCheck(ctx context.Context, liveHosts []string) ([]Findin
 			TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
 		},
 		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			if !scope.HostInScope(req.URL.Hostname(), e.cfg.Target.Domains) {
+				return http.ErrUseLastResponse
+			}
 			if len(via) >= 3 {
 				return http.ErrUseLastResponse
 			}

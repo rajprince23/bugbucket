@@ -98,6 +98,8 @@ func normalizeURLForDedup(parsed *url.URL) string {
 // Users who want SQLMap can run it manually on the nuclei-confirmed targets.
 func (e *Engine) runSQLiScan(ctx context.Context, liveHosts []string, allURLs []string) ([]Finding, error) {
 	var findings []Finding
+	liveHosts, _ = e.filterScopedURLs(liveHosts)
+	allURLs, _ = e.filterScopedURLs(allURLs)
 
 	// ── Strategy 1: Nuclei SQLi templates on live hosts ──
 	nucleiFindings, err := e.runNucleiSQLi(ctx, liveHosts)
@@ -131,6 +133,7 @@ func (e *Engine) runSQLiScan(ctx context.Context, liveHosts []string, allURLs []
 // runNucleiSQLi runs nuclei with SQL injection detection templates on live hosts.
 // Uses sqli, injection, and database error-based tags.
 func (e *Engine) runNucleiSQLi(ctx context.Context, hosts []string) ([]Finding, error) {
+	hosts, _ = e.filterScopedURLs(hosts)
 	if len(hosts) == 0 {
 		return nil, nil
 	}
@@ -157,6 +160,7 @@ func (e *Engine) runNucleiSQLi(ctx context.Context, hosts []string) ([]Finding, 
 		"-l", tmpFile.Name(),
 		"-jsonl",
 		"-silent",
+		"-disable-redirects",
 		"-tags", "sqli,injection,sql",
 		"-severity", "critical,high,medium",
 		"-c", "25",
@@ -192,6 +196,7 @@ func (e *Engine) runNucleiSQLi(ctx context.Context, hosts []string) ([]Finding, 
 // runNucleiSQLiFuzz runs nuclei fuzzing templates on gf-filtered parameterized URLs.
 // This is more targeted and effective than blind sqlmap on Wayback URLs.
 func (e *Engine) runNucleiSQLiFuzz(ctx context.Context, paramURLs []string) ([]Finding, error) {
+	paramURLs, _ = e.filterScopedURLs(paramURLs)
 	if len(paramURLs) == 0 {
 		return nil, nil
 	}
@@ -215,6 +220,7 @@ func (e *Engine) runNucleiSQLiFuzz(ctx context.Context, paramURLs []string) ([]F
 		"-l", tmpFile.Name(),
 		"-jsonl",
 		"-silent",
+		"-disable-redirects",
 		"-tags", "sqli,injection,fuzz",
 		"-severity", "critical,high,medium",
 		"-c", "10",

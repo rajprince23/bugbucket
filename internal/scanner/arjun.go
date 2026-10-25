@@ -10,6 +10,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/Btr4k/bugbounty-agent/internal/scope"
 )
 
 // ArjunResult represents a single arjun discovery result
@@ -30,6 +32,7 @@ type ArjunResult struct {
 func (e *Engine) runArjun(ctx context.Context, liveHosts []string) ([]Finding, []string, error) {
 	var findings []Finding
 	var newParamURLs []string
+	liveHosts, _ = e.filterScopedURLs(liveHosts)
 
 	if len(liveHosts) == 0 {
 		return findings, newParamURLs, nil
@@ -107,6 +110,10 @@ func (e *Engine) runArjun(ctx context.Context, liveHosts []string) ([]Finding, [
 
 // runArjunOnTarget runs arjun on a single URL and returns discovered parameters.
 func (e *Engine) runArjunOnTarget(ctx context.Context, target string) ([]ArjunResult, error) {
+	if !scope.URLInScope(target, e.cfg.Target.Domains) {
+		return nil, fmt.Errorf("refusing out-of-scope Arjun target")
+	}
+
 	tmpOut, err := os.CreateTemp("", "arjun-out-*.json")
 	if err != nil {
 		return nil, fmt.Errorf("failed to create temp file: %w", err)
@@ -119,6 +126,7 @@ func (e *Engine) runArjunOnTarget(ctx context.Context, target string) ([]ArjunRe
 
 	args := []string{
 		"-u", target,
+		"--disable-redirects",
 		"--get",              // Test GET parameters
 		"--post",             // Test POST parameters
 		"-oJ", tmpOut.Name(), // JSON output
