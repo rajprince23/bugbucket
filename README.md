@@ -88,58 +88,6 @@ The domain supplied with `-d` or `-t` is the authorized scope. Active checks are
 
 ---
 
-## Output
-
-Reports are saved to `./reports/` in Markdown:
-
-```
-reports/
-└── bug_bounty_report_2026-04-04_16-41-25.md
-```
-
-### Report Structure
-
-```
-Executive Summary
-  └── Risk score · Finding counts · Subdomains discovered
-
-Critical Findings
-  └── Title · URL · Evidence · Impact · Remediation · PoC (when enabled)
-
-High / Medium / Low Findings
-  └── Same structure
-
-Subdomain List
-  └── All discovered subdomains
-```
-
-Set `reporting.include_poc` in `config.yaml` to control whether proof-of-concept details appear in the report. Impact and remediation text is generated from deterministic local rules; it is guidance and does not establish exploitability.
-
-Reports support `reporting.format: "markdown"` or `"json"` and `reporting.language: "en"` or `"ar"`. `reporting.severity_filter` accepts `critical`, `high`, `medium`, `low`, and `info`; when empty, reports include critical through low severity findings, matching the default report behavior.
-
-Reports also include an OWASP Top 10:2021 coverage table based only on existing checks. Categories are marked `covered` when a mapped check completed, `not run` when mapped checks exist but none completed, or `not covered` when this project has no mapped check. This is an indicative mapping, not comprehensive OWASP coverage or a guarantee that a category is secure.
-
-Offline Nmap XML imports produce informational open-port findings with any detected service, product, and version details. When `reporting.severity_filter` is empty, offline import mode includes informational findings in the generated report.
-
----
-
-## CORS Severity Reference
-
-BugBasket's built-in CORS engine tests multiple attack vectors and assigns severity  
-based on actual exploitability — not just header presence:
-
-| Pattern | Severity | Exploitable? |
-|---|---|---|
-| Origin reflected + `credentials: true` | **Critical** | Yes — any attacker site can steal authenticated data |
-| Null origin + `credentials: true` | **High** | Yes — exploitable via sandboxed iframe |
-| Subdomain spoof + `credentials: true` | **High** | Yes — attacker registers a matching domain |
-| HTTP origin on HTTPS + `credentials: true` | **High** | Yes — requires network MITM position |
-| Origin reflected, no credentials | **High** | Yes — public/unauthenticated data readable cross-origin |
-| Subdomain spoof, no credentials | **Medium** | Partial — weak origin validation, no credentials |
-| `*` + `credentials: true` | **Medium** | No — browsers reject this combination per CORS spec |
-
----
-
 ## Legal
 
 > **BugBasket is for authorized security testing only.**  
