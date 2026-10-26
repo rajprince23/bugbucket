@@ -137,7 +137,7 @@ func (e *Engine) runArjunOnTarget(ctx context.Context, target string) ([]ArjunRe
 	}
 
 	cmd := exec.CommandContext(targetCtx, "arjun", args...)
-	if err := cmd.Run(); err != nil {
+	if _, _, err := runCommandOutput(cmd, "Arjun", e.log.VerboseEnabled()); err != nil {
 		// arjun exits non-zero when no params found — normal
 	}
 

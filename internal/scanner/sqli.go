@@ -2,7 +2,6 @@ package scanner
 
 import (
 	"bufio"
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -188,12 +187,9 @@ func (e *Engine) runNucleiSQLi(ctx context.Context, hosts []string) ([]Finding, 
 	defer cancel()
 
 	cmd := exec.CommandContext(nucleiCtx, "nuclei", args...)
-	var stderrBuf bytes.Buffer
-	cmd.Stderr = &stderrBuf
-
-	output, err := cmd.Output()
+	output, stderr, err := runCommandOutput(cmd, "Nuclei SQLi", e.log.VerboseEnabled())
 	if err != nil {
-		if stderr := strings.TrimSpace(stderrBuf.String()); stderr != "" {
+		if stderr := strings.TrimSpace(string(stderr)); stderr != "" {
 			return parseNucleiOutput(output), fmt.Errorf("nuclei execution failed: %w: %s", err, stderr)
 		}
 		return parseNucleiOutput(output), fmt.Errorf("nuclei execution failed: %w", err)
@@ -247,12 +243,9 @@ func (e *Engine) runNucleiSQLiFuzz(ctx context.Context, paramURLs []string) ([]F
 	defer cancel()
 
 	cmd := exec.CommandContext(fuzzCtx, "nuclei", args...)
-	var stderrBuf bytes.Buffer
-	cmd.Stderr = &stderrBuf
-
-	output, err := cmd.Output()
+	output, stderr, err := runCommandOutput(cmd, "Nuclei SQLi fuzz", e.log.VerboseEnabled())
 	if err != nil {
-		if stderr := strings.TrimSpace(stderrBuf.String()); stderr != "" {
+		if stderr := strings.TrimSpace(string(stderr)); stderr != "" {
 			return parseNucleiOutput(output), fmt.Errorf("nuclei execution failed: %w: %s", err, stderr)
 		}
 		return parseNucleiOutput(output), fmt.Errorf("nuclei execution failed: %w", err)

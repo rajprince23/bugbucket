@@ -2,7 +2,6 @@ package scanner
 
 import (
 	"bufio"
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -564,12 +563,9 @@ func (e *Engine) runNucleiDirect(ctx context.Context, targets []string) ([]Findi
 	e.log.Debugf("Nuclei: scanning %d full URLs", len(targets))
 
 	cmd := exec.CommandContext(ctx, "nuclei", args...)
-	var stderrBuf bytes.Buffer
-	cmd.Stderr = &stderrBuf
-
-	output, err := cmd.Output()
+	output, stderr, err := runCommandOutput(cmd, "Nuclei", e.log.VerboseEnabled())
 	if err != nil {
-		if stderr := strings.TrimSpace(stderrBuf.String()); stderr != "" {
+		if stderr := strings.TrimSpace(string(stderr)); stderr != "" {
 			return nil, fmt.Errorf("nuclei failed: %w: %s", err, stderr)
 		}
 		return nil, fmt.Errorf("nuclei failed: %w", err)
@@ -838,15 +834,11 @@ func (e *Engine) runHttpx(ctx context.Context, targets []string) ([]Finding, []s
 
 	cmd := exec.CommandContext(ctx, httpxBin, args...)
 
-	// Capture stderr for debugging
-	var stderrBuf bytes.Buffer
-	cmd.Stderr = &stderrBuf
-
-	output, err := cmd.Output()
+	output, stderr, err := runCommandOutput(cmd, "httpx", e.log.VerboseEnabled())
 	if err != nil {
 		e.log.Debugf("Httpx finished with error: %v", err)
-		if stderrBuf.Len() > 0 {
-			e.log.Debugf("Httpx stderr: %s", stderrBuf.String())
+		if len(stderr) > 0 {
+			e.log.Debugf("Httpx stderr: %s", stderr)
 		}
 	}
 
@@ -943,12 +935,9 @@ func (e *Engine) runNmap(ctx context.Context, targets []string) ([]Finding, erro
 		args = append(args, "--open", "-T4", target)
 
 		cmd := exec.CommandContext(ctx, "nmap", args...)
-		var stderrBuf bytes.Buffer
-		cmd.Stderr = &stderrBuf
-
-		output, err := cmd.Output()
+		output, stderr, err := runCommandOutput(cmd, "Nmap", e.log.VerboseEnabled())
 		if err != nil {
-			errMsg := stderrBuf.String()
+			errMsg := string(stderr)
 			if errMsg != "" {
 				e.log.Debugf("Nmap scan failed for %s: %v (stderr: %s)", target, err, errMsg)
 			} else {
@@ -1296,15 +1285,12 @@ func (e *Engine) runDalfox(ctx context.Context, urls []string) ([]Finding, error
 
 	cmd := exec.CommandContext(ctx, "dalfox", args...)
 
-	var stderrBuf bytes.Buffer
-	cmd.Stderr = &stderrBuf
-
-	output, err := cmd.Output()
+	output, stderr, err := runCommandOutput(cmd, "Dalfox", e.log.VerboseEnabled())
 	if err != nil {
 		// Dalfox may return non-zero even with results
 		e.log.Debugf("Dalfox finished with error (may be normal): %v", err)
-		if stderrBuf.Len() > 0 {
-			e.log.Debugf("Dalfox stderr: %s", stderrBuf.String())
+		if len(stderr) > 0 {
+			e.log.Debugf("Dalfox stderr: %s", stderr)
 		}
 	}
 

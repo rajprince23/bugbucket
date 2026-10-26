@@ -73,6 +73,10 @@ func (l *Logger) Close() {
 	l.Sync()
 }
 
+func (l *Logger) VerboseEnabled() bool {
+	return l.Desugar().Core().Enabled(zap.DebugLevel)
+}
+
 // ═══════════════════════════════════════════════════════════
 // Professional Progress Output Methods
 // ═══════════════════════════════════════════════════════════

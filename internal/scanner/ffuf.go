@@ -259,10 +259,8 @@ func (e *Engine) runFfufOnHost(ctx context.Context, host, wordlistPath string) (
 	}
 
 	cmd := exec.CommandContext(hostCtx, "ffuf", args...)
-	var stderrBuf bytes.Buffer
-	cmd.Stderr = &stderrBuf
-
-	if err := cmd.Run(); err != nil {
+	_, _, runErr := runCommandOutput(cmd, "ffuf directory", e.log.VerboseEnabled())
+	if runErr != nil {
 		// ffuf exits non-zero when no results — read output anyway
 		if _, statErr := os.Stat(tmpOut.Name()); statErr != nil {
 			return findings, nil
@@ -447,10 +445,8 @@ func (e *Engine) runFfufVhost(ctx context.Context, liveHosts []string) ([]Findin
 	}
 
 	cmd := exec.CommandContext(vhostCtx, "ffuf", args...)
-	var stderrBuf bytes.Buffer
-	cmd.Stderr = &stderrBuf
-
-	if err := cmd.Run(); err != nil {
+	_, _, runErr := runCommandOutput(cmd, "ffuf vhost", e.log.VerboseEnabled())
+	if runErr != nil {
 		// Non-zero exit is normal when no results
 	}
 
