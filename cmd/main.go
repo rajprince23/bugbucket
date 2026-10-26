@@ -497,6 +497,10 @@ func runAgent(cmd *cobra.Command, args []string) error {
 	phaseStart = time.Now()
 
 	reportGen := reporter.NewGenerator(cfg, log)
+	reportFindingCounts, err := reportGen.CountFindings(scanResults, analysisResults)
+	if err != nil {
+		return fmt.Errorf("failed to count report findings: %w", err)
+	}
 	reportPath, err := reportGen.Generate(reconResults, scanResults, analysisResults)
 	if err != nil {
 		return fmt.Errorf("report generation failed: %w", err)
@@ -510,9 +514,9 @@ func runAgent(cmd *cobra.Command, args []string) error {
 	duration := time.Since(startTime)
 
 	// Print final summary
-	printSummary(duration, critical, high, medium, low, info, reportPath,
-		len(reconResults.Subdomains), len(scanResults.Findings),
-		len(analysisResults.ValidatedFindings))
+	printSummary(duration, reportFindingCounts, reportPath,
+		len(reconResults.Subdomains),
+		reportFindingCounts.RuleAssessed)
 
 	return nil
 }
@@ -592,7 +596,7 @@ func validateDomain(domain string) error {
 func countBySeverity(findings []scanner.Finding) (int, int, int, int, int) {
 	var critical, high, medium, low, info int
 	for _, f := range findings {
-		switch f.Severity {
+		switch strings.ToLower(f.Severity) {
 		case "critical":
 			critical++
 		case "high":
@@ -629,10 +633,10 @@ func banner() string {
 `
 }
 
-func printSummary(duration time.Duration, critical, high, medium, low, info int,
-	reportPath string, subdomains, totalFindings, validated int) {
+func printSummary(duration time.Duration, findings reporter.FindingCounts,
+	reportPath string, subdomains, validated int) {
 
-	total := critical + high + medium + low + info
+	total := findings.Total()
 
 	bold := color.New(color.FgWhite, color.Bold)
 	cyan := color.New(color.FgCyan, color.Bold)
@@ -651,7 +655,7 @@ func printSummary(duration time.Duration, critical, high, medium, low, info int,
 	fmt.Printf("  🌐 Subdomains:        %-26d", subdomains)
 	cyan.Println("║")
 	cyan.Print("  ║")
-	fmt.Printf("  🔎 Vulnerabilities:   %-26d", totalFindings)
+	fmt.Printf("  🔎 Report Findings:   %-26d", total)
 	cyan.Println("║")
 	cyan.Print("  ║")
 	fmt.Printf("  ✓  Rule-Assessed:     %-26d", validated)
@@ -668,10 +672,10 @@ func printSummary(duration time.Duration, critical, high, medium, low, info int,
 		count int
 		c     *color.Color
 	}{
-		{"🔴", "Critical", critical, red},
-		{"🟠", "High", high, color.New(color.FgHiRed)},
-		{"🟡", "Medium", medium, yellow},
-		{"🟢", "Low", low, green},
+		{"🔴", "Critical", findings.Critical, red},
+		{"🟠", "High", findings.High, color.New(color.FgHiRed)},
+		{"🟡", "Medium", findings.Medium, yellow},
+		{"🟢", "Low", findings.Low, green},
 	}
 
 	for _, s := range severities {
@@ -686,9 +690,9 @@ func printSummary(duration time.Duration, critical, high, medium, low, info int,
 	}
 
 	// Show info count separately if exists
-	if info > 0 {
+	if findings.Info > 0 {
 		cyan.Print("  ║")
-		dim.Printf("     ℹ️  Info (hidden) → %-5d", info)
+		dim.Printf("     ℹ️  Info           → %-5d", findings.Info)
 		fmt.Print("                    ")
 		cyan.Println("║")
 	}
@@ -713,15 +717,15 @@ func printSummary(duration time.Duration, critical, high, medium, low, info int,
 
 	fmt.Println()
 	if total == 0 {
-		green.Println("  ✅ SECURE: No vulnerabilities detected - Target appears secure")
-	} else if critical > 0 {
-		red.Printf("  🚨 URGENT: Found %d CRITICAL vulnerabilities - Immediate action required!\n", critical)
-	} else if high > 0 {
-		color.New(color.FgHiRed).Printf("  ⚠️  WARNING: Found %d HIGH severity issues - Review report immediately\n", high)
-	} else if medium > 0 {
-		yellow.Printf("  ⚡ ATTENTION: Found %d MEDIUM severity findings - Review recommended\n", medium)
+		green.Println("  ✅ No findings matched the report severity filter")
+	} else if findings.Critical > 0 {
+		red.Printf("  🚨 URGENT: Found %d CRITICAL vulnerabilities - Immediate action required!\n", findings.Critical)
+	} else if findings.High > 0 {
+		color.New(color.FgHiRed).Printf("  ⚠️  WARNING: Found %d HIGH severity issues - Review report immediately\n", findings.High)
+	} else if findings.Medium > 0 {
+		yellow.Printf("  ⚡ ATTENTION: Found %d MEDIUM severity findings - Review recommended\n", findings.Medium)
 	} else {
-		green.Printf("  ℹ️  INFO: Found %d low-severity findings - Review when convenient\n", total)
+		green.Printf("  ℹ️  INFO: Found %d report findings - Review the report\n", total)
 	}
 	fmt.Println()
 	cyan.Println("  📌 Thank you for using BugBasket!")

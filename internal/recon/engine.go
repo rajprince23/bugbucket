@@ -27,13 +27,14 @@ type Engine struct {
 }
 
 type Results struct {
-	Subdomains   []string
-	URLs         []string
-	Endpoints    []string
-	IPs          []string
-	Technologies []Technology
-	Secrets      []Secret
-	JSFiles      []JSFile
+	Subdomains            []string
+	OutOfScopeSubdomains int
+	URLs                  []string
+	Endpoints             []string
+	IPs                   []string
+	Technologies          []Technology
+	Secrets               []Secret
+	JSFiles               []JSFile
 }
 
 type JSFile struct {
@@ -210,6 +211,14 @@ func (e *Engine) Run(ctx context.Context) (*Results, error) {
 
 	// Sanitize subdomains: strip wildcards, remove invalid entries
 	results.Subdomains = e.sanitizeSubdomains(results.Subdomains)
+
+	// Keep the shared recon result list limited to the authorized target scope.
+	var rejectedSubdomains int
+	results.Subdomains, rejectedSubdomains = filterScopedReconHosts(results.Subdomains, e.cfg.Target.Domains)
+	results.OutOfScopeSubdomains = rejectedSubdomains
+	if rejectedSubdomains > 0 {
+		e.log.Warnf("Excluded %d out-of-scope recon hosts from the in-scope subdomain list", rejectedSubdomains)
+	}
 
 	// Apply limits (guard against MaxSubdomains=0 to avoid wiping results)
 	if e.cfg.Recon.MaxSubdomains > 0 && len(results.Subdomains) > e.cfg.Recon.MaxSubdomains {
