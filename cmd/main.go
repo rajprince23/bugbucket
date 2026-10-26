@@ -43,7 +43,7 @@ func main() {
 	rootCmd.Flags().StringVarP(&cfgFile, "config", "c", "config.yaml", "Config file")
 	rootCmd.Flags().StringVarP(&targetDomain, "target", "t", "", "Target domain")
 	rootCmd.Flags().StringVarP(&targetDomain, "domain", "d", "", "Target domain (alias for -t/--target)")
-	rootCmd.Flags().StringVarP(&outputDir, "output", "o", "./reports", "Output directory")
+	rootCmd.Flags().StringVarP(&outputDir, "output", "o", "", "Output directory")
 	rootCmd.Flags().BoolVarP(&verbose, "verbose", "v", false, "Verbose output")
 	rootCmd.Flags().BoolVar(&skipRecon, "skip-recon", false, "Skip the reconnaissance phase")
 	rootCmd.Flags().BoolVar(&skipScan, "skip-scan", false, "Skip the vulnerability scanning phase")
@@ -80,14 +80,18 @@ func runAgent(cmd *cobra.Command, args []string) error {
 	}
 
 	offlineImport := nmapXMLFile != ""
-	if !offlineImport {
+	if !offlineImport && cfg.Scanning.Enabled && !skipScan && !jsOnly {
 		// Validate required tools are installed before wasting time
 		checkTools(log)
 	}
 
 	// Add target domain to config
 	cfg.Target.Domains = []string{targetDomain}
-	cfg.Reporting.OutputDir = outputDir
+	if cmd.Flags().Changed("output") {
+		cfg.Reporting.OutputDir = outputDir
+	} else if cfg.Reporting.OutputDir == "" {
+		cfg.Reporting.OutputDir = "./reports"
+	}
 
 	// Setup context with cancellation
 	ctx, cancel := context.WithCancel(context.Background())
@@ -128,14 +132,20 @@ func runAgent(cmd *cobra.Command, args []string) error {
 	var reconResults *recon.Results
 	phaseStart := time.Now()
 
-	if skipRecon || offlineImport {
+	if skipRecon || offlineImport || !cfg.Recon.Enabled {
 		if offlineImport {
 			dim.Println("  ⏭️  Skipping reconnaissance phase (--nmap-xml: offline import mode)")
+		} else if !cfg.Recon.Enabled {
+			dim.Println("  ⏭️  Skipping reconnaissance phase (disabled in config)")
 		} else {
 			dim.Println("  ⏭️  Skipping reconnaissance phase (--skip-recon)")
 		}
+		subdomains := make([]string, 0)
+		if !offlineImport && cfg.Scanning.Enabled {
+			subdomains = append(subdomains, targetDomain)
+		}
 		reconResults = &recon.Results{
-			Subdomains: make([]string, 0),
+			Subdomains: subdomains,
 			URLs:       make([]string, 0),
 			Endpoints:  make([]string, 0),
 			IPs:        make([]string, 0),
@@ -186,11 +196,13 @@ func runAgent(cmd *cobra.Command, args []string) error {
 	var critical, high, medium, low, info int
 	var displayFindings []scanner.Finding
 
-	if skipScan || jsOnly || offlineImport {
+	if skipScan || jsOnly || offlineImport || !cfg.Scanning.Enabled {
 		if offlineImport {
 			dim.Println("  ⏭️  Skipping active scans (--nmap-xml: offline import mode)")
 		} else if jsOnly {
 			dim.Println("  ⏭️  Skipping vulnerability scanning (--js-only: recon done, JS analysis next)")
+		} else if !cfg.Scanning.Enabled {
+			dim.Println("  ⏭️  Skipping vulnerability scanning (disabled in config)")
 		} else {
 			dim.Println("  ⏭️  Skipping vulnerability scanning (--skip-scan)")
 		}
@@ -458,7 +470,7 @@ func runAgent(cmd *cobra.Command, args []string) error {
 	analyzerEngine := analyzer.NewEngine(cfg, log)
 	analysisResults, err := analyzerEngine.Analyze(ctx, scanResults)
 	if err != nil {
-		log.Warnf("Analysis failed: %v", err)
+		return fmt.Errorf("analysis failed: %w", err)
 	}
 
 	analysisDuration := time.Since(phaseStart)

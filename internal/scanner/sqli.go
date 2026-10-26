@@ -112,9 +112,12 @@ func (e *Engine) runSQLiScan(ctx context.Context, liveHosts []string, allURLs []
 	// ── Strategy 2: Parameter-targeted nuclei fuzzing ──
 	sqliURLs := filterSQLiProneURLs(allURLs)
 	if len(sqliURLs) > 0 {
-		// Cap at 50 — nuclei fuzzing is fast enough
-		if len(sqliURLs) > 50 {
-			sqliURLs = sqliURLs[:50]
+		maxURLs := e.cfg.Scanning.Tools.SQLMap.MaxURLs
+		if maxURLs <= 0 {
+			maxURLs = 50
+		}
+		if len(sqliURLs) > maxURLs {
+			sqliURLs = sqliURLs[:maxURLs]
 		}
 		e.log.Debugf("SQLi: found %d gf-filtered param URLs to fuzz", len(sqliURLs))
 		paramFindings, err := e.runNucleiSQLiFuzz(ctx, sqliURLs)

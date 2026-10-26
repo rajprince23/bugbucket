@@ -71,6 +71,10 @@ func NewEngine(cfg *config.Config, log *logger.Logger) *Engine {
 }
 
 func (e *Engine) Run(ctx context.Context, reconResults *recon.Results) (*Results, error) {
+	if !e.cfg.Scanning.Enabled {
+		e.log.ToolSkip("Scanning", "disabled in config")
+		return &Results{Findings: make([]Finding, 0)}, nil
+	}
 	if len(e.cfg.Target.Domains) == 0 {
 		return nil, fmt.Errorf("active scanning requires an explicitly authorized target domain")
 	}
@@ -444,62 +448,31 @@ func (e *Engine) Run(ctx context.Context, reconResults *recon.Results) (*Results
 
 	wg.Wait()
 
-	// Deduplicate findings across all tools.
-	//
-	// Two-pass strategy:
-	//   Pass 1 — exact dedup: same title + same URL from the same tool (fast path).
-	//   Pass 2 — cross-tool dedup: different tools that flagged the same URL for the
-	//            same vulnerability class (e.g. nuclei "Codeigniter .env" AND ffuf
-	//            "Environment File Exposed" both pointing at the same /.env URL).
-	//            Keep whichever finding has the higher severity; ties keep the first.
-
-	severityRank := map[string]int{
-		"critical": 4,
-		"high":     3,
-		"medium":   2,
-		"low":      1,
-		"info":     0,
+	// Remove exact duplicates while preserving distinct findings on the same URL.
+	type findingKey struct {
+		id       string
+		typeName string
+		title    string
+		target   string
+		url      string
+		evidence string
 	}
-
-	// Pass 1: exact dedup (title + URL)
-	exactSeen := make(map[string]bool)
-	pass1 := make([]Finding, 0, len(results.Findings))
+	exactSeen := make(map[findingKey]bool)
+	deduped := make([]Finding, 0, len(results.Findings))
 	for _, f := range results.Findings {
-		key := strings.ToLower(f.Title + "|" + f.URL)
+		key := findingKey{
+			id:       strings.ToLower(f.ID),
+			typeName: strings.ToLower(f.Type),
+			title:    strings.ToLower(f.Title),
+			target:   strings.ToLower(f.Target),
+			url:      strings.ToLower(f.URL),
+			evidence: strings.ToLower(f.Evidence),
+		}
 		if !exactSeen[key] {
 			exactSeen[key] = true
-			pass1 = append(pass1, f)
+			deduped = append(deduped, f)
 		}
 	}
-
-	// Pass 2: cross-tool dedup by URL — keep highest-severity finding per URL.
-	// Findings from JS analysis are intentionally excluded from this pass because
-	// a single JS file can legitimately contain multiple distinct issue types
-	// (e.g. eval() AND a hardcoded API key are different findings on the same URL).
-	urlBest := make(map[string]Finding) // key: normalised URL
-	var jsFindings []Finding
-	for _, f := range pass1 {
-		if f.Type == "js-analysis" {
-			jsFindings = append(jsFindings, f)
-			continue
-		}
-		key := strings.ToLower(f.URL)
-		existing, exists := urlBest[key]
-		if !exists {
-			urlBest[key] = f
-			continue
-		}
-		// Replace if this finding has strictly higher severity
-		if severityRank[strings.ToLower(f.Severity)] > severityRank[strings.ToLower(existing.Severity)] {
-			urlBest[key] = f
-		}
-	}
-
-	deduped := make([]Finding, 0, len(urlBest)+len(jsFindings))
-	for _, f := range urlBest {
-		deduped = append(deduped, f)
-	}
-	deduped = append(deduped, jsFindings...)
 	results.Findings = deduped
 
 	// Calculate statistics
@@ -540,6 +513,9 @@ func (e *Engine) runNucleiDirect(ctx context.Context, targets []string) ([]Findi
 		"-disable-redirects",
 		"-stats",
 		"-si", "30",
+	}
+	if len(e.cfg.Scanning.Tools.Nuclei.Severity) > 0 {
+		args = append(args, "-severity", strings.Join(e.cfg.Scanning.Tools.Nuclei.Severity, ","))
 	}
 
 	templatesBase := e.cfg.Scanning.Tools.Nuclei.TemplatesPath
@@ -593,7 +569,10 @@ func (e *Engine) runNucleiDirect(ctx context.Context, targets []string) ([]Findi
 
 	output, err := cmd.Output()
 	if err != nil {
-		e.log.Debugf("Nuclei finished with error (might be normal): %v", err)
+		if stderr := strings.TrimSpace(stderrBuf.String()); stderr != "" {
+			return nil, fmt.Errorf("nuclei failed: %w: %s", err, stderr)
+		}
+		return nil, fmt.Errorf("nuclei failed: %w", err)
 	}
 
 	// Parse JSON output (same parsing as runNuclei)
@@ -850,9 +829,11 @@ func (e *Engine) runHttpx(ctx context.Context, targets []string) ([]Finding, []s
 		"-json",
 		"-silent",
 		"-td",
-		"-sc",
 		"-t", fmt.Sprintf("%d", e.cfg.Scanning.Threads),
 		"-rl", fmt.Sprintf("%d", e.cfg.Scanning.RateLimit),
+	}
+	if e.cfg.Scanning.Tools.Httpx.StatusCode {
+		args = append(args, "-sc")
 	}
 
 	cmd := exec.CommandContext(ctx, httpxBin, args...)

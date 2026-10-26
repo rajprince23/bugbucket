@@ -64,6 +64,19 @@ func NewEngine(cfg *config.Config, log *logger.Logger) *Engine {
 }
 
 func (e *Engine) Run(ctx context.Context) (*Results, error) {
+	if !e.cfg.Recon.Enabled {
+		e.log.ToolSkip("Reconnaissance", "disabled in config")
+		return &Results{
+			Subdomains:   make([]string, 0),
+			URLs:         make([]string, 0),
+			Endpoints:    make([]string, 0),
+			IPs:          make([]string, 0),
+			Technologies: make([]Technology, 0),
+			Secrets:      make([]Secret, 0),
+			JSFiles:      make([]JSFile, 0),
+		}, nil
+	}
+
 	// Apply timeout from config
 	ctx, cancel := context.WithTimeout(ctx, time.Duration(e.cfg.Recon.Timeout)*time.Second)
 	defer cancel()
