@@ -11,7 +11,6 @@ import (
 )
 
 type Config struct {
-	C99           C99Config           `yaml:"c99" mapstructure:"c99"`
 	Target        TargetConfig        `yaml:"target" mapstructure:"target"`
 	Recon         ReconConfig         `yaml:"recon" mapstructure:"recon"`
 	Scanning      ScanningConfig      `yaml:"scanning" mapstructure:"scanning"`
@@ -19,11 +18,6 @@ type Config struct {
 	Reporting     ReportingConfig     `yaml:"reporting" mapstructure:"reporting"`
 	Notifications NotificationsConfig `yaml:"notifications" mapstructure:"notifications"`
 	Logging       LoggingConfig       `yaml:"logging" mapstructure:"logging"`
-}
-
-type C99Config struct {
-	APIKey  string `yaml:"api_key" mapstructure:"api_key"`
-	Enabled bool   `yaml:"enabled" mapstructure:"enabled"`
 }
 
 type TargetConfig struct {
@@ -41,12 +35,13 @@ type ReconConfig struct {
 }
 
 type ReconToolsConfig struct {
-	Subfinder     bool `yaml:"subfinder" mapstructure:"subfinder"`
-	Amass         bool `yaml:"amass" mapstructure:"amass"`
-	Assetfinder   bool `yaml:"assetfinder" mapstructure:"assetfinder"`
-	GitHubDorking bool `yaml:"github_dorking" mapstructure:"github_dorking"`
-	Wayback       bool `yaml:"wayback" mapstructure:"wayback"`
-	Katana        bool `yaml:"katana" mapstructure:"katana"`
+	Subfinder        bool `yaml:"subfinder" mapstructure:"subfinder"`
+	Amass            bool `yaml:"amass" mapstructure:"amass"`
+	Assetfinder      bool `yaml:"assetfinder" mapstructure:"assetfinder"`
+	CertTransparency bool `yaml:"cert_transparency" mapstructure:"cert_transparency"`
+	GitHubDorking    bool `yaml:"github_dorking" mapstructure:"github_dorking"`
+	Wayback          bool `yaml:"wayback" mapstructure:"wayback"`
+	Katana           bool `yaml:"katana" mapstructure:"katana"`
 }
 
 type ScanningConfig struct {
@@ -63,6 +58,7 @@ type ScanningToolsConfig struct {
 	Nmap   NmapConfig   `yaml:"nmap" mapstructure:"nmap"`
 	Dalfox DalfoxConfig `yaml:"dalfox" mapstructure:"dalfox"`
 	SQLMap SQLMapConfig `yaml:"sqlmap" mapstructure:"sqlmap"`
+	Arjun  ArjunConfig  `yaml:"arjun" mapstructure:"arjun"`
 	Ffuf   FfufConfig   `yaml:"ffuf" mapstructure:"ffuf"`
 	CORS   CORSConfig   `yaml:"cors" mapstructure:"cors"`
 }
@@ -76,6 +72,10 @@ type FfufConfig struct {
 type SQLMapConfig struct {
 	Enabled bool `yaml:"enabled" mapstructure:"enabled"`
 	MaxURLs int  `yaml:"max_urls" mapstructure:"max_urls"`
+}
+
+type ArjunConfig struct {
+	Enabled bool `yaml:"enabled" mapstructure:"enabled"`
 }
 
 type CORSConfig struct {
@@ -184,8 +184,6 @@ func Load(filename string) (*Config, error) {
 	viper.SetDefault("scanning.rate_limit", 100)
 	viper.SetDefault("reporting.format", "markdown")
 	viper.SetDefault("reporting.language", "ar")
-	viper.SetDefault("c99.enabled", false)
-
 	// Read config file
 	viper.SetConfigFile(filename)
 	viper.SetConfigType("yaml")
@@ -200,14 +198,6 @@ func Load(filename string) (*Config, error) {
 	var cfg Config
 	if err := viper.Unmarshal(&cfg); err != nil {
 		return nil, fmt.Errorf("failed to unmarshal config: %w", err)
-	}
-
-	cfg.C99.APIKey = os.ExpandEnv(cfg.C99.APIKey)
-
-	if cfg.C99.APIKey == "" || cfg.C99.APIKey == "${C99_API_KEY}" {
-		if envKey := os.Getenv("C99_API_KEY"); envKey != "" {
-			cfg.C99.APIKey = envKey
-		}
 	}
 
 	// Validate after expanding optional environment variables.

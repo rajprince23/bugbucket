@@ -42,6 +42,7 @@ type reportLabels struct {
 	lowRisk                  string
 	ruleAssessedFindings     string
 	findingsDiscarded        string
+	notAssessed              string
 	attackSurface            string
 	criticalAlert            string
 	summary                  string
@@ -70,6 +71,7 @@ var reportLabelsByLanguage = map[string]reportLabels{
 		totalFindings: "Total Findings", executiveSummary: "Executive Summary", overallRisk: "Overall Risk Level",
 		criticalRisk: "Critical Risk", highRisk: "High Risk", mediumRisk: "Medium Risk", lowRisk: "Low Risk",
 		ruleAssessedFindings: "Rule-Assessed Findings", findingsDiscarded: "Findings Discarded",
+		notAssessed: "Not assessed",
 		attackSurface: "Attack Surface", criticalAlert: "CRITICAL FINDINGS DETECTED — Immediate remediation recommended.",
 		summary: "Summary", severity: "Severity", count: "Count", additionalFindings: "Additional Scanner Findings",
 		reviewDisclaimer: "These findings were detected by automated scanners and retained for manual review.",
@@ -83,6 +85,7 @@ var reportLabelsByLanguage = map[string]reportLabels{
 		totalFindings: "إجمالي النتائج", executiveSummary: "الملخص التنفيذي", overallRisk: "مستوى المخاطر العام",
 		criticalRisk: "مخاطر حرجة", highRisk: "مخاطر عالية", mediumRisk: "مخاطر متوسطة", lowRisk: "مخاطر منخفضة",
 		ruleAssessedFindings: "النتائج التي قيّمتها القواعد", findingsDiscarded: "النتائج المستبعدة",
+		notAssessed: "لم يتم التقييم",
 		attackSurface: "سطح الهجوم", criticalAlert: "تم اكتشاف نتائج حرجة — يُوصى بالمعالجة الفورية.",
 		summary: "الملخص", severity: "الخطورة", count: "العدد", additionalFindings: "نتائج إضافية من أدوات الفحص",
 		reviewDisclaimer: "اكتشفت أدوات الفحص الآلية هذه النتائج واحتُفظ بها للمراجعة اليدوية.",
@@ -339,36 +342,46 @@ func additionalScannerFindings(scanResults *scanner.Results, analysis *analyzer.
 }
 
 func newReportDocument(now time.Time, reportLanguage string, domains []string, reconResults *recon.Results, analysis *analyzer.Analysis, additionalFindings []scanner.Finding, coverage []owaspCoverageEntry) reportDocument {
-	severityCounts := make(map[string]int)
-	for _, severity := range []string{"critical", "high", "medium", "low", "info"} {
-		count := 0
-		switch severity {
-		case "critical":
-			count = analysis.Stats.Critical
-		case "high":
-			count = analysis.Stats.High
-		case "medium":
-			count = analysis.Stats.Medium
-		case "low":
-			count = analysis.Stats.Low
-		case "info":
-			count = analysis.Stats.Info
-		}
-		if count > 0 {
-			severityCounts[severity] = count
-		}
-	}
-
 	riskScore := calculateRiskScore(analysis.ValidatedFindings)
 	labels := reportLabelsByLanguage[reportLanguage]
+	riskLevel := riskLevelForScore(riskScore, labels)
+	if !g.cfg.Analysis.Enabled {
+		riskLevel = labels.notAssessed
+	}
+	severityCounts := make(map[string]int)
+	for _, severity := range []string{"critical", "high", "medium", "low", "info"} {
+		switch severity {
+		case "critical":
+			severityCounts[severity] = analysis.Stats.Critical
+		case "high":
+			severityCounts[severity] = analysis.Stats.High
+		case "medium":
+			severityCounts[severity] = analysis.Stats.Medium
+		case "low":
+			severityCounts[severity] = analysis.Stats.Low
+		case "info":
+			severityCounts[severity] = analysis.Stats.Info
+		}
+	}
+	for _, finding := range additionalFindings {
+		severity := strings.ToLower(finding.Severity)
+		if _, ok := severityCounts[severity]; ok {
+			severityCounts[severity]++
+		}
+	}
+	for severity, count := range severityCounts {
+		if count == 0 {
+			delete(severityCounts, severity)
+		}
+	}
 	return reportDocument{
 		Date: now.Format("2006-01-02 15:04"),
 		Language: reportLanguage,
 		Target: strings.Join(domains, ", "),
-		TotalFindings: len(analysis.ValidatedFindings),
+		TotalFindings: len(analysis.ValidatedFindings) + len(additionalFindings),
 		ExecutiveSummary: reportSummary{
 			RiskScore: riskScore,
-			RiskLevel: riskLevelForScore(riskScore, labels),
+			RiskLevel: riskLevel,
 			RuleAssessedFindings: analysis.Stats.Validated,
 			FindingsDiscarded:    analysis.Stats.FalsePositives,
 			SubdomainsFound:      len(reconResults.Subdomains),
@@ -425,10 +438,13 @@ func (g *Generator) generateMarkdownReport(now time.Time, reconResults *recon.Re
 	report.WriteString(fmt.Sprintf("**%s**: %s  \n", labels.date, now.Format("2006-01-02 15:04")))
 	report.WriteString(fmt.Sprintf("**%s**: %s  \n", labels.target, target))
 	report.WriteString(fmt.Sprintf("**%s**: %d  \n", labels.subdomainsFound, len(reconResults.Subdomains)))
-	report.WriteString(fmt.Sprintf("**%s**: %d  \n\n", labels.totalFindings, len(analysis.ValidatedFindings)))
+	report.WriteString(fmt.Sprintf("**%s**: %d  \n\n", labels.totalFindings, len(analysis.ValidatedFindings)+len(additionalFindings)))
 
 	riskScore := calculateRiskScore(analysis.ValidatedFindings)
 	riskLevel := riskLevelForScore(riskScore, labels)
+	if !g.cfg.Analysis.Enabled {
+		riskLevel = labels.notAssessed
+	}
 	report.WriteString("## " + labels.executiveSummary + "\n\n")
 	report.WriteString(fmt.Sprintf("**%s**: %s (score: %d)  \n", labels.overallRisk, riskLevel, riskScore))
 	report.WriteString(fmt.Sprintf("**%s**: %d  \n", labels.ruleAssessedFindings, analysis.Stats.Validated))
@@ -454,6 +470,11 @@ func (g *Generator) generateMarkdownReport(now time.Time, reconResults *recon.Re
 			count = analysis.Stats.Medium
 		case "low":
 			count = analysis.Stats.Low
+		}
+		for _, finding := range additionalFindings {
+			if strings.EqualFold(finding.Severity, severity) {
+				count++
+			}
 		}
 		if count > 0 {
 			report.WriteString(fmt.Sprintf("| %s %s | %d |\n", g.getSeverityEmoji(severity), localizedSeverity(severity, labels), count))

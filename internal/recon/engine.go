@@ -180,43 +180,26 @@ func (e *Engine) Run(ctx context.Context) (*Results, error) {
 		e.log.ToolSkip("GitHub Dorking", "disabled in config")
 	}
 
-	// C99 API Intelligence
-	if e.cfg.C99.Enabled && e.cfg.C99.APIKey != "" {
+	// Certificate Transparency
+	if e.cfg.Recon.Tools.CertTransparency {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			e.log.ToolStart("C99 API", "querying subdomain intelligence...")
+			e.log.ToolStart("CertTransparency", "querying CT logs...")
 			start := time.Now()
-			subs, err := e.runC99Subdomains(ctx)
+			subs, err := e.runCertTransparency(ctx)
 			if err != nil {
-				e.log.ToolFail("C99 API", err)
+				e.log.ToolFail("CertTransparency", err)
 				return
 			}
-			e.log.ToolDone("C99 API", len(subs), time.Since(start))
+			e.log.ToolDone("CertTransparency", len(subs), time.Since(start))
 			mu.Lock()
 			results.Subdomains = append(results.Subdomains, subs...)
 			mu.Unlock()
 		}()
 	} else {
-		e.log.ToolSkip("C99 API", "disabled or no API key")
+		e.log.ToolSkip("CertTransparency", "disabled in config")
 	}
-
-	// Certificate Transparency
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		e.log.ToolStart("CertTransparency", "querying CT logs...")
-		start := time.Now()
-		subs, err := e.runCertTransparency(ctx)
-		if err != nil {
-			e.log.ToolFail("CertTransparency", err)
-			return
-		}
-		e.log.ToolDone("CertTransparency", len(subs), time.Since(start))
-		mu.Lock()
-		results.Subdomains = append(results.Subdomains, subs...)
-		mu.Unlock()
-	}()
 
 	// Wait for all goroutines
 	wg.Wait()
@@ -472,67 +455,6 @@ func (e *Engine) sanitizeSubdomains(subdomains []string) []string {
 		clean = append(clean, s)
 	}
 	return clean
-}
-
-// C99 API Integration
-func (e *Engine) runC99Subdomains(ctx context.Context) ([]string, error) {
-	e.log.Debug("Running C99 subdomain enumeration...")
-
-	var results []string
-	for _, domain := range e.cfg.Target.Domains {
-		url := fmt.Sprintf("https://api.c99.nl/subdomainfinder?key=%s&domain=%s&json",
-			e.cfg.C99.APIKey, domain)
-
-		req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
-		if err != nil {
-			return nil, fmt.Errorf("C99 request creation failed: %w", err)
-		}
-
-		client := &http.Client{Timeout: 30 * time.Second}
-		resp, err := client.Do(req)
-		if err != nil {
-			return nil, fmt.Errorf("C99 API request failed: %w", err)
-		}
-		defer resp.Body.Close()
-
-		if resp.StatusCode != http.StatusOK {
-			return nil, fmt.Errorf("C99 API returned status %d", resp.StatusCode)
-		}
-
-		body, err := io.ReadAll(resp.Body)
-		if err != nil {
-			return nil, fmt.Errorf("failed to read C99 response: %w", err)
-		}
-
-		// Parse C99 JSON response
-		var c99Response struct {
-			Success    bool `json:"success"`
-			Subdomains []struct {
-				Subdomain string `json:"subdomain"`
-			} `json:"subdomains"`
-		}
-
-		if err := json.Unmarshal(body, &c99Response); err != nil {
-			// Try alternate format (array of strings)
-			var altResponse []string
-			if err2 := json.Unmarshal(body, &altResponse); err2 != nil {
-				return nil, fmt.Errorf("failed to parse C99 response: %w", err)
-			}
-			results = append(results, altResponse...)
-			continue
-		}
-
-		if c99Response.Success {
-			for _, sub := range c99Response.Subdomains {
-				if sub.Subdomain != "" {
-					results = append(results, sub.Subdomain)
-				}
-			}
-		}
-	}
-
-	e.log.Infof("C99 found %d subdomains", len(results))
-	return results, nil
 }
 
 // runCertTransparency queries Certificate Transparency logs with retry

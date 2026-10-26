@@ -101,17 +101,6 @@ build_bugbasket() {
     go build -o bugbasket ./cmd/main.go && success "BugBasket built successfully: ./bugbasket" || error "Build failed"
 }
 
-# ─── Setup .env ──────────────────────────────────────────────
-setup_env() {
-    if [[ ! -f ".env" ]]; then
-        cp .env.example .env
-        warn "Created optional .env from template — set C99_API_KEY only if using C99 recon:"
-        warn "  nano .env"
-    else
-        success ".env already exists"
-    fi
-}
-
 # ─── Run ─────────────────────────────────────────────────────
 check_go
 install_system_tools
@@ -119,7 +108,6 @@ install_go_tools
 install_python_tools
 setup_nuclei
 build_bugbasket
-setup_env
 
 echo ""
 echo -e "${GREEN}${BOLD}══════════════════════════════════════════${RESET}"
@@ -127,8 +115,7 @@ echo -e "${GREEN}${BOLD}  ✅ Installation complete!${RESET}"
 echo -e "${GREEN}${BOLD}══════════════════════════════════════════${RESET}"
 echo ""
 echo -e "  Next steps:"
-echo -e "  1. Optionally set ${CYAN}C99_API_KEY${RESET} in .env for C99 passive reconnaissance"
-echo -e "  2. Run: ${CYAN}./bugbasket --target example.com --verbose${RESET}"
+echo -e "  1. Run: ${CYAN}./bugbasket --target example.com --verbose${RESET}"
 echo ""
 echo -e "  Docs: ${CYAN}https://github.com/rajprince23/bugbucket${RESET}"
 echo ""

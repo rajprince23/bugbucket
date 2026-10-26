@@ -379,7 +379,7 @@ func (e *Engine) Run(ctx context.Context, reconResults *recon.Results) (*Results
 	// Arjun Hidden Parameter Discovery — runs sequentially so results feed into Dalfox below.
 	// FFUF and CORS are already launched above and run in parallel while Arjun works.
 	var arjunParamURLs []string
-	{
+	if e.cfg.Scanning.Tools.Arjun.Enabled {
 		arjunCtx, arjunCancel := context.WithTimeout(ctx, 5*time.Minute)
 		e.log.ToolStart("Arjun", fmt.Sprintf("discovering hidden parameters on %d live hosts...", len(liveHosts)))
 		arjunStart := time.Now()
@@ -395,8 +395,10 @@ func (e *Engine) Run(ctx context.Context, reconResults *recon.Results) (*Results
 			mu.Unlock()
 			arjunParamURLs = newURLs
 		} else {
-			e.log.Debugf("Arjun: no hidden parameters found")
+			e.log.ToolDone("Arjun", 0, time.Since(arjunStart))
 		}
+	} else {
+		e.log.ToolSkip("Arjun", "disabled in config")
 	}
 
 	// Dalfox XSS Parameter Fuzzing — uses Wayback URLs + Arjun-discovered params

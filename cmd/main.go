@@ -466,19 +466,28 @@ func runAgent(cmd *cobra.Command, args []string) error {
 	// ═══════════════════════════════════════
 	// Phase 3: Deterministic local analysis
 	// ═══════════════════════════════════════
-	printPhaseHeader("3", "RULE-BASED ANALYSIS", "🧭")
 	phaseStart = time.Now()
 
-	analyzerEngine := analyzer.NewEngine(cfg, log)
-	analysisResults, err := analyzerEngine.Analyze(ctx, scanResults)
-	if err != nil {
-		return fmt.Errorf("analysis failed: %w", err)
-	}
+	var analysisResults *analyzer.Analysis
+	if cfg.Analysis.Enabled {
+		printPhaseHeader("3", "RULE-BASED ANALYSIS", "🧭")
+		analyzerEngine := analyzer.NewEngine(cfg, log)
+		analysisResults, err = analyzerEngine.Analyze(ctx, scanResults)
+		if err != nil {
+			return fmt.Errorf("analysis failed: %w", err)
+		}
 
-	analysisDuration := time.Since(phaseStart)
-	green.Printf("  ✅ Completed in %s\n", analysisDuration.Round(time.Second))
-	fmt.Printf("  ├── ✓ Rule-assessed:   %s\n", white.Sprintf("%d", len(analysisResults.ValidatedFindings)))
-	fmt.Printf("  └── ✗ Discarded:       %s\n", white.Sprintf("%d", len(analysisResults.FalsePositives)))
+		analysisDuration := time.Since(phaseStart)
+		green.Printf("  ✅ Completed in %s\n", analysisDuration.Round(time.Second))
+		fmt.Printf("  ├── ✓ Rule-assessed:   %s\n", white.Sprintf("%d", len(analysisResults.ValidatedFindings)))
+		fmt.Printf("  └── ✗ Discarded:       %s\n", white.Sprintf("%d", len(analysisResults.FalsePositives)))
+	} else {
+		dim.Println("  ⏭️  Skipping deterministic analysis (disabled in config); scanner findings remain unassessed")
+		analysisResults = &analyzer.Analysis{
+			ValidatedFindings: make([]analyzer.ValidatedFinding, 0),
+			FalsePositives:    make([]analyzer.ValidatedFinding, 0),
+		}
+	}
 	fmt.Println()
 
 	// ═══════════════════════════════════════
@@ -521,13 +530,14 @@ func checkTools(log interface{ Warnf(string, ...interface{}) }, cfg *config.Conf
 		{"subfinder", runRecon && cfg.Recon.Tools.Subfinder, runRecon && cfg.Recon.Tools.Subfinder, "go install -v github.com/projectdiscovery/subfinder/v2/cmd/subfinder@latest"},
 		{"httpx", runScan && cfg.Scanning.Tools.Httpx.Enabled, runScan && cfg.Scanning.Tools.Httpx.Enabled, "go install -v github.com/projectdiscovery/httpx/cmd/httpx@latest"},
 		{"nuclei", runScan && (cfg.Scanning.Tools.Nuclei.Enabled || cfg.Scanning.Tools.SQLMap.Enabled), runScan && (cfg.Scanning.Tools.Nuclei.Enabled || cfg.Scanning.Tools.SQLMap.Enabled), "go install -v github.com/projectdiscovery/nuclei/v3/cmd/nuclei@latest"},
-		// Optional but highly recommended
-		{"katana", true, false, "go install github.com/projectdiscovery/katana/cmd/katana@latest"},
-		{"assetfinder", true, false, "go install github.com/tomnomnom/assetfinder@latest"},
-		{"dalfox", true, false, "go install github.com/hahwul/dalfox/v2@latest"},
-		{"ffuf", true, false, "go install github.com/ffuf/ffuf/v2@latest"},
-		{"nmap", true, false, "apt install nmap"},
-		{"arjun", true, false, "pip3 install arjun"},
+		{"assetfinder", runRecon && cfg.Recon.Tools.Assetfinder, false, "go install github.com/tomnomnom/assetfinder@latest"},
+		{"waybackurls", runRecon && cfg.Recon.Tools.Wayback, false, "go install github.com/tomnomnom/waybackurls@latest"},
+		{"katana", runRecon && cfg.Recon.Tools.Katana, false, "go install github.com/projectdiscovery/katana/cmd/katana@latest"},
+		{"github-search", runRecon && cfg.Recon.Tools.GitHubDorking, false, "install github-search"},
+		{"dalfox", runScan && cfg.Scanning.Tools.Dalfox.Enabled, false, "go install github.com/hahwul/dalfox/v2@latest"},
+		{"ffuf", runScan && cfg.Scanning.Tools.Ffuf.Enabled, false, "go install github.com/ffuf/ffuf/v2@latest"},
+		{"nmap", runScan && cfg.Scanning.Tools.Nmap.Enabled, false, "apt install nmap"},
+		{"arjun", runScan && cfg.Scanning.Tools.Arjun.Enabled, false, "pip3 install arjun"},
 	}
 
 	missing := []string{}

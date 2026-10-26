@@ -32,10 +32,10 @@ That's it. BugBasket handles the rest.
 
 | Module | Engine | Finds |
 |---|---|---|
-| Subdomain Recon | subfinder · assetfinder · crt.sh · C99 | Subdomains |
+| Subdomain Recon | subfinder · assetfinder · crt.sh | Subdomains |
 | URL Discovery | waybackurls · katana | Endpoints, parameters, JS files |
 | Live Detection | httpx | Live hosts, HTTP status, tech stack |
-| Vulnerability Scan | nuclei (full templates) | CVEs, misconfigs, exposures, takeovers |
+| Vulnerability Scan | nuclei (selected templates) | CVEs, misconfigs, exposures, takeovers |
 | CORS Testing | Built-in Go engine | Origin reflection, null origin, subdomain spoof, HTTP downgrade |
 | Directory Fuzzing | ffuf | Hidden paths, admin panels, sensitive files |
 | Vhost Discovery | ffuf (Host header) | Hidden virtual hosts |
@@ -50,7 +50,7 @@ That's it. BugBasket handles the rest.
 
 ## Kali Linux Setup
 
-Use Go 1.24 or later and Git. The installer does not install Go. The CLI also requires `subfinder`, `httpx`, and `nuclei` on `PATH`, even if Nuclei is disabled in `config.yaml`.
+Use Go 1.24 or later and Git. The current sample requires `subfinder`, `assetfinder`, `waybackurls`, and ProjectDiscovery `httpx` on `PATH`. Katana is optional and must be enabled in `config.yaml` before use.
 
 ```bash
 git clone https://github.com/rajprince23/bugbucket.git
@@ -60,12 +60,35 @@ go version
 go install github.com/projectdiscovery/subfinder/v2/cmd/subfinder@latest
 go install github.com/projectdiscovery/httpx/cmd/httpx@latest
 go install github.com/projectdiscovery/nuclei/v3/cmd/nuclei@latest
+go install github.com/tomnomnom/assetfinder@latest
+go install github.com/tomnomnom/waybackurls@latest
+go install github.com/projectdiscovery/katana/cmd/katana@latest
 export PATH="$(go env GOPATH)/bin:$PATH"
 
 go build -o bugbasket ./cmd/main.go
 ```
 
-Analysis runs locally and requires no provider credentials. `C99_API_KEY` is optional and only needed if you enable C99 passive reconnaissance.
+Analysis runs locally and requires no provider credentials.
+
+Optional scanner binaries are needed only when their corresponding `scanning.tools.*.enabled` setting is enabled:
+
+```bash
+go install github.com/projectdiscovery/nuclei/v3/cmd/nuclei@latest # Nuclei and SQLi checks
+go install github.com/hahwul/dalfox/v2@latest                    # Dalfox XSS
+go install github.com/ffuf/ffuf/v2@latest                        # ffuf path and vhost discovery
+sudo apt install nmap                                             # Nmap
+python3 -m pip install arjun                                      # Arjun
+```
+
+CORS checks and JS regex analysis are built in and require no extra scanner binary. SQLi is implemented with Nuclei; the `sqlmap` config section does not invoke SQLMap.
+
+### Configuration
+
+Recon tools are controlled by `recon.enabled` and the switches under `recon.tools`: `subfinder`, `assetfinder`, `cert_transparency`, `wayback`, and `katana`. The sample enables Subfinder, Assetfinder, and Wayback; certificate-transparency and Katana sources are optional. `amass` is present in the schema but is not currently implemented.
+
+Scanner tools are controlled by `scanning.enabled` and their switches under `scanning.tools`: `httpx.enabled`, `nuclei.enabled`, `nmap.enabled`, `dalfox.enabled`, `ffuf.enabled`, `sqlmap.enabled` (Nuclei-based SQLi checks), `arjun.enabled`, and `cors.enabled`. The sample enables httpx and keeps the other active vulnerability scanning and fuzzing modules disabled; enable only checks permitted by the target's written authorization. JS regex scanning uses `analysis.js_analysis`; deterministic finding analysis uses `analysis.enabled`. Global request pacing is set by `scanning.threads` and `scanning.rate_limit`.
+
+The CLI enforces the supplied target domain as scope. Do not weaken scope checks or raise request limits without authorization.
 
 Run from the project directory, replacing `example.com` with a domain you are authorized to test:
 
