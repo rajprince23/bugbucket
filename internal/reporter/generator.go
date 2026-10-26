@@ -194,39 +194,39 @@ func (g *Generator) Generate(reconResults *recon.Results, scanResults *scanner.R
 		content = []byte(g.generateMarkdownReport(now, reconResults, filteredAnalysis, additionalFindings, coverage, labels))
 	}
 
-	func buildOWASPCoverage(scanResults *scanner.Results) []owaspCoverageEntry {
-		coverage := make([]owaspCoverageEntry, 0, len(owaspCoverageChecks))
-		for _, category := range owaspCoverageChecks {
-			entry := owaspCoverageEntry{
-				ID:       category.id,
-				Category: category.category,
-				Status:   "not covered",
-				Checks:   append([]string{}, category.checks...),
-			}
-			if len(category.checks) > 0 {
-				entry.Status = "not run"
-				if scanResults.ScanExecuted {
-					for _, check := range category.checks {
-						if scanResults.CompletedChecks[check] {
-							entry.CompletedChecks = append(entry.CompletedChecks, check)
-						}
-					}
-					if len(entry.CompletedChecks) > 0 {
-						entry.Status = "covered"
-					}
-				}
-			}
-			coverage = append(coverage, entry)
-		}
-		return coverage
-	}
-
 	if err := os.WriteFile(outputPath, content, 0644); err != nil {
 		return "", fmt.Errorf("failed to write report: %w", err)
 	}
 
 	g.log.Infof("Report generated successfully: %s", outputPath)
 	return outputPath, nil
+}
+
+func buildOWASPCoverage(scanResults *scanner.Results) []owaspCoverageEntry {
+	coverage := make([]owaspCoverageEntry, 0, len(owaspCoverageChecks))
+	for _, category := range owaspCoverageChecks {
+		entry := owaspCoverageEntry{
+			ID:       category.id,
+			Category: category.category,
+			Status:   "not covered",
+			Checks:   append([]string{}, category.checks...),
+		}
+		if len(category.checks) > 0 {
+			entry.Status = "not run"
+			if scanResults.ScanExecuted {
+				for _, check := range category.checks {
+					if scanResults.CompletedChecks[check] {
+						entry.CompletedChecks = append(entry.CompletedChecks, check)
+					}
+				}
+				if len(entry.CompletedChecks) > 0 {
+					entry.Status = "covered"
+				}
+			}
+		}
+		coverage = append(coverage, entry)
+	}
+	return coverage
 }
 
 func selectedSeverities(configured []string) ([]string, error) {
