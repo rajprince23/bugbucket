@@ -17,11 +17,11 @@ recon:
   max_wayback_urls: 1000
   tools:
     subfinder: true
-    amass: false
+    amass: true
     assetfinder: true
-    github_dorking: false
+    github_dorking: true
     wayback: true
-    katana: false
+    katana: true
 
 scanning:
   enabled: true
@@ -34,26 +34,26 @@ scanning:
       follow_redirects: true
       status_code: true
     nuclei:
-      enabled: false
+      enabled: true
       severity: ["low", "medium", "high", "critical"]
       templates_path: ""
     nmap:
-      enabled: false
+      enabled: true
       ports: "80,443"
       fast_scan: true
     dalfox:
-      enabled: false
+      enabled: true
       blind_url: ""
       max_urls: 10
     ffuf:
-      enabled: false
+      enabled: true
       wordlist_path: ""
       max_targets: 5
     sqlmap:
-      enabled: false
+      enabled: true
       max_urls: 10
     cors:
-      enabled: false
+      enabled: true
 
 analysis:
   enabled: true
