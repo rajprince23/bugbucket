@@ -305,6 +305,9 @@ func (e *Engine) Run(ctx context.Context, reconResults *recon.Results) (*Results
 			defer sqliCancel()
 
 			findings, err := e.runSQLiScan(sqliCtx, liveHosts, reconResults.URLs)
+			mu.Lock()
+			results.Findings = append(results.Findings, findings...)
+			mu.Unlock()
 			if err != nil {
 				e.log.ToolFail("SQLi-Scan", err)
 				return
@@ -314,9 +317,6 @@ func (e *Engine) Run(ctx context.Context, reconResults *recon.Results) (*Results
 				markCheckCompleted("sqli")
 			}
 			e.log.ToolDone("SQLi-Scan", len(findings), time.Since(start))
-			mu.Lock()
-			results.Findings = append(results.Findings, findings...)
-			mu.Unlock()
 		}()
 	}
 

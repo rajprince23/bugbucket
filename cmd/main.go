@@ -80,9 +80,11 @@ func runAgent(cmd *cobra.Command, args []string) error {
 	}
 
 	offlineImport := nmapXMLFile != ""
-	if !offlineImport && cfg.Scanning.Enabled && !skipScan && !jsOnly {
+	runRecon := cfg.Recon.Enabled && !skipRecon && !offlineImport
+	runScan := cfg.Scanning.Enabled && !skipScan && !jsOnly && !offlineImport
+	if runRecon || runScan {
 		// Validate required tools are installed before wasting time
-		checkTools(log)
+		checkTools(log, cfg, runRecon, runScan)
 	}
 
 	// Add target domain to config
@@ -506,30 +508,33 @@ func runAgent(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-// checkTools validates that critical external tools are installed before scanning starts.
+// checkTools validates required external tools for the enabled phases.
 // Logs warnings for optional tools and fatals for required ones.
-func checkTools(log interface{ Warnf(string, ...interface{}) }) {
+func checkTools(log interface{ Warnf(string, ...interface{}) }, cfg *config.Config, runRecon, runScan bool) {
 	type tool struct {
 		name     string
+		check    bool
 		required bool
 		install  string
 	}
 	tools := []tool{
-		// Required
-		{"subfinder", true, "go install -v github.com/projectdiscovery/subfinder/v2/cmd/subfinder@latest"},
-		{"httpx", true, "go install -v github.com/projectdiscovery/httpx/cmd/httpx@latest"},
-		{"nuclei", true, "go install -v github.com/projectdiscovery/nuclei/v3/cmd/nuclei@latest"},
+		{"subfinder", runRecon && cfg.Recon.Tools.Subfinder, runRecon && cfg.Recon.Tools.Subfinder, "go install -v github.com/projectdiscovery/subfinder/v2/cmd/subfinder@latest"},
+		{"httpx", runScan && cfg.Scanning.Tools.Httpx.Enabled, runScan && cfg.Scanning.Tools.Httpx.Enabled, "go install -v github.com/projectdiscovery/httpx/cmd/httpx@latest"},
+		{"nuclei", runScan && (cfg.Scanning.Tools.Nuclei.Enabled || cfg.Scanning.Tools.SQLMap.Enabled), runScan && (cfg.Scanning.Tools.Nuclei.Enabled || cfg.Scanning.Tools.SQLMap.Enabled), "go install -v github.com/projectdiscovery/nuclei/v3/cmd/nuclei@latest"},
 		// Optional but highly recommended
-		{"katana", false, "go install github.com/projectdiscovery/katana/cmd/katana@latest"},
-		{"assetfinder", false, "go install github.com/tomnomnom/assetfinder@latest"},
-		{"dalfox", false, "go install github.com/hahwul/dalfox/v2@latest"},
-		{"ffuf", false, "go install github.com/ffuf/ffuf/v2@latest"},
-		{"nmap", false, "apt install nmap"},
-		{"arjun", false, "pip3 install arjun"},
+		{"katana", true, false, "go install github.com/projectdiscovery/katana/cmd/katana@latest"},
+		{"assetfinder", true, false, "go install github.com/tomnomnom/assetfinder@latest"},
+		{"dalfox", true, false, "go install github.com/hahwul/dalfox/v2@latest"},
+		{"ffuf", true, false, "go install github.com/ffuf/ffuf/v2@latest"},
+		{"nmap", true, false, "apt install nmap"},
+		{"arjun", true, false, "pip3 install arjun"},
 	}
 
 	missing := []string{}
 	for _, t := range tools {
+		if !t.check {
+			continue
+		}
 		if _, err := exec.LookPath(t.name); err != nil {
 			if t.required {
 				missing = append(missing, fmt.Sprintf("  ❌ REQUIRED: %-12s → install: %s", t.name, t.install))

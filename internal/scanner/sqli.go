@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/url"
 	"os"
@@ -98,13 +99,15 @@ func normalizeURLForDedup(parsed *url.URL) string {
 // Users who want SQLMap can run it manually on the nuclei-confirmed targets.
 func (e *Engine) runSQLiScan(ctx context.Context, liveHosts []string, allURLs []string) ([]Finding, error) {
 	var findings []Finding
+	var scanErrors []error
+
 	liveHosts, _ = e.filterScopedURLs(liveHosts)
 	allURLs, _ = e.filterScopedURLs(allURLs)
 
 	// ── Strategy 1: Nuclei SQLi templates on live hosts ──
 	nucleiFindings, err := e.runNucleiSQLi(ctx, liveHosts)
 	if err != nil {
-		e.log.Warnf("Nuclei SQLi scan error: %v", err)
+		scanErrors = append(scanErrors, fmt.Errorf("Nuclei SQLi scan: %w", err))
 	} else {
 		findings = append(findings, nucleiFindings...)
 	}
@@ -122,7 +125,7 @@ func (e *Engine) runSQLiScan(ctx context.Context, liveHosts []string, allURLs []
 		e.log.Debugf("SQLi: found %d gf-filtered param URLs to fuzz", len(sqliURLs))
 		paramFindings, err := e.runNucleiSQLiFuzz(ctx, sqliURLs)
 		if err != nil {
-			e.log.Warnf("Nuclei SQLi fuzz error: %v", err)
+			scanErrors = append(scanErrors, fmt.Errorf("Nuclei SQLi fuzz: %w", err))
 		} else {
 			findings = append(findings, paramFindings...)
 		}
@@ -130,7 +133,7 @@ func (e *Engine) runSQLiScan(ctx context.Context, liveHosts []string, allURLs []
 		e.log.Debugf("SQLi: no SQL-prone parameter URLs found — skipping param fuzzing")
 	}
 
-	return findings, nil
+	return findings, errors.Join(scanErrors...)
 }
 
 // runNucleiSQLi runs nuclei with SQL injection detection templates on live hosts.
@@ -189,8 +192,11 @@ func (e *Engine) runNucleiSQLi(ctx context.Context, hosts []string) ([]Finding, 
 	cmd.Stderr = &stderrBuf
 
 	output, err := cmd.Output()
-	if err != nil && len(output) == 0 {
-		return nil, nil
+	if err != nil {
+		if stderr := strings.TrimSpace(stderrBuf.String()); stderr != "" {
+			return parseNucleiOutput(output), fmt.Errorf("nuclei execution failed: %w: %s", err, stderr)
+		}
+		return parseNucleiOutput(output), fmt.Errorf("nuclei execution failed: %w", err)
 	}
 
 	return parseNucleiOutput(output), nil
@@ -205,7 +211,7 @@ func (e *Engine) runNucleiSQLiFuzz(ctx context.Context, paramURLs []string) ([]F
 	}
 
 	if _, err := exec.LookPath("nuclei"); err != nil {
-		return nil, nil
+		return nil, fmt.Errorf("nuclei not installed: %w", err)
 	}
 
 	tmpFile, err := os.CreateTemp("", "nuclei-sqli-fuzz-*.txt")
@@ -245,8 +251,11 @@ func (e *Engine) runNucleiSQLiFuzz(ctx context.Context, paramURLs []string) ([]F
 	cmd.Stderr = &stderrBuf
 
 	output, err := cmd.Output()
-	if err != nil && len(output) == 0 {
-		return nil, nil
+	if err != nil {
+		if stderr := strings.TrimSpace(stderrBuf.String()); stderr != "" {
+			return parseNucleiOutput(output), fmt.Errorf("nuclei execution failed: %w: %s", err, stderr)
+		}
+		return parseNucleiOutput(output), fmt.Errorf("nuclei execution failed: %w", err)
 	}
 
 	return parseNucleiOutput(output), nil
