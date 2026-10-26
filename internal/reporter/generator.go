@@ -174,7 +174,7 @@ func (g *Generator) Generate(reconResults *recon.Results, scanResults *scanner.R
 	if format == "markdown" {
 		extension = "md"
 	}
-	filename := fmt.Sprintf("bug_bounty_report_%s.%s", now.Format("2006-01-02_15-04-05"), extension)
+	filename := fmt.Sprintf("%s_%s.%s", normalizeReportTarget(g.cfg.Target.Domains), now.Format("2006-01-02_150405"), extension)
 	outputPath := filepath.Join(g.cfg.Reporting.OutputDir, filename)
 
 	var content []byte
@@ -200,6 +200,30 @@ func (g *Generator) Generate(reconResults *recon.Results, scanResults *scanner.R
 
 	g.log.Infof("Report generated successfully: %s", outputPath)
 	return outputPath, nil
+}
+
+func normalizeReportTarget(domains []string) string {
+	if len(domains) == 0 {
+		return "target"
+	}
+
+	var normalized strings.Builder
+	for _, r := range strings.ToLower(strings.TrimSpace(domains[0])) {
+		switch {
+		case r >= 'a' && r <= 'z', r >= '0' && r <= '9', r == '-':
+			normalized.WriteRune(r)
+		case r == '.':
+			normalized.WriteByte('-')
+		default:
+			normalized.WriteByte('-')
+		}
+	}
+
+	target := strings.Trim(normalized.String(), "-")
+	if target == "" {
+		return "target"
+	}
+	return target
 }
 
 func buildOWASPCoverage(scanResults *scanner.Results) []owaspCoverageEntry {
